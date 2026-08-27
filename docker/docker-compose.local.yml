@@ -1,0 +1,55 @@
+# Local development override - no GPU, uses local models only
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./cache:/app/cache
+      # Mount source for live reload
+      - ../src:/app/src:ro
+    environment:
+      - VIDEO_CONTEXT_WORKDIR=/app/data
+      - VIDEO_CONTEXT_CACHE_ENABLED=true
+      - VIDEO_CONTEXT_LOG_LEVEL=DEBUG
+      - VIDEO_CONTEXT_LOG_FORMAT=text
+      - VIDEO_CONTEXT_VISION_PROVIDER=null
+      - VIDEO_CONTEXT_EMBEDDING_PROVIDER=local
+      - VIDEO_CONTEXT_ASR_PROVIDER=faster-whisper
+      - VIDEO_CONTEXT_OCR_PROVIDER=tesseract
+      - VIDEO_CONTEXT_LLM_PROVIDER=null
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    volumes:
+      - ../apps/web/src:/app/src:ro
+      - ../apps/web/index.html:/app/index.html:ro
+      - ../apps/web/vite.config.ts:/app/vite.config.ts:ro
+      - ../apps/web/package.json:/app/package.json:ro
+    command: npm run dev -- --host 0.0.0.0
+    restart: unless-stopped
+
+volumes:
+  data:
+  output:
+  cache:

@@ -1,0 +1,56 @@
+# GPU-accelerated configuration - requires NVIDIA Container Toolkit
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.gpu
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./data:/app/data
+      - ./output:/app/output
+      - ./cache:/app/cache
+    environment:
+      - VIDEO_CONTEXT_WORKDIR=/app/data
+      - VIDEO_CONTEXT_CACHE_ENABLED=true
+      - VIDEO_CONTEXT_LOG_LEVEL=INFO
+      - VIDEO_CONTEXT_LOG_FORMAT=json
+      - VIDEO_CONTEXT_VISION_PROVIDER=gemini
+      - VIDEO_CONTEXT_EMBEDDING_PROVIDER=local
+      - VIDEO_CONTEXT_ASR_PROVIDER=faster-whisper
+      - VIDEO_CONTEXT_OCR_PROVIDER=tesseract
+      - VIDEO_CONTEXT_LLM_PROVIDER=openai
+      - VIDEO_CONTEXT_ASR_DEVICE=cuda
+      - VIDEO_CONTEXT_ASR_COMPUTE_TYPE=float16
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  web:
+    build:
+      context: ../apps/web
+      dockerfile: docker/Dockerfile.web
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+    environment:
+      - VITE_API_URL=http://localhost:8000
+    restart: unless-stopped
+
+volumes:
+  data:
+  output:
+  cache:

@@ -1,0 +1,70 @@
+# VideoContext GPU Dockerfile
+# Requires NVIDIA Container Toolkit and CUDA-enabled host
+
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3.12 \
+    python3.12-venv \
+    python3.12-dev \
+    build-essential \
+    git \
+    ffmpeg \
+    tesseract-ocr \
+    libtesseract-dev \
+    poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment
+RUN python3.12 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install Python dependencies with CUDA support
+COPY pyproject.toml uv.lock ./
+RUN pip install --no-cache-dir uv && \
+    uv pip install --system -e ".[all]" && \
+    uv pip install --system torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+
+# Runtime stage
+FROM nvidia/cuda:12.4.0-runtime-ubuntu22.04 AS runtime
+
+WORKDIR /app
+
+# Copy virtual environment from builder
+COPY --from=builder /opt/venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Install runtime system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    tesseract-ocr \
+    libtesseract-dev \
+    poppler-utils \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN useradd -m -u 1000 videocontent && \
+    mkdir -p /app/data /app/output /app/cache && \
+    chown -R videocontent:videocontent /app
+
+# Copy application code
+COPY --chown=videocontent:videocontent src/ ./src/
+COPY --chown=videocontent:videocontent pyproject.toml ./
+
+# Install the package
+RUN pip install --no-cache-dir -e .
+
+USER videocontent
+
+# Environment variables
+ENV VIDEO_CONTEXT_WORKDIR=/app/data
+ENV VIDEO_CONTEXT_CACHE_ENABLED=true
+ENV PYTHONUNBUFFERED=1
+
+# Default command
+ENTRYPOINT ["videocontent"]
+CMD ["--help"]

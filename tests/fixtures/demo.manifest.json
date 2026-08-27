@@ -1,0 +1,108 @@
+{
+  "video": "/Users/aagamshah/React/VIDEOContext/tests/fixtures/demo.mp4",
+  "duration": 62.4,
+  "fps": 30,
+  "width": 1280,
+  "height": 720,
+  "speech": true,
+  "narrated_shots": 8,
+  "shots": [
+    {
+      "shot": "title",
+      "screen": "title",
+      "start": 0.0,
+      "end": 6.0,
+      "narration": "Welcome to the quarterly business review.",
+      "has_audio": true
+    },
+    {
+      "shot": "agenda",
+      "screen": "agenda",
+      "start": 6.0,
+      "end": 12.0,
+      "narration": "Here is the agenda. Revenue, pricing, competitors, and a live demo.",
+      "has_audio": true
+    },
+    {
+      "shot": "revenue",
+      "screen": "revenue",
+      "start": 12.0,
+      "end": 20.0,
+      "narration": "Revenue reached forty two lakh rupees this quarter, up eighteen percent.",
+      "has_audio": true
+    },
+    {
+      "shot": "pricing",
+      "screen": "pricing",
+      "start": 20.0,
+      "end": 29.0,
+      "narration": "Our pricing starts at twenty nine dollars for the starter plan, and four hundred ninety nine dollars at scale.",
+      "has_audio": true
+    },
+    {
+      "shot": "flash",
+      "screen": "flash",
+      "start": 29.0,
+      "end": 29.4,
+      "narration": "",
+      "has_audio": false
+    },
+    {
+      "shot": "competitor",
+      "screen": "competitor",
+      "start": 29.4,
+      "end": 37.4,
+      "narration": "Competitor pricing is roughly two dollars per hour of video.",
+      "has_audio": true
+    },
+    {
+      "shot": "silence",
+      "screen": "objects",
+      "start": 37.4,
+      "end": 41.4,
+      "narration": "",
+      "has_audio": false
+    },
+    {
+      "shot": "browser",
+      "screen": "browser",
+      "start": 41.4,
+      "end": 48.4,
+      "narration": "Now the demo. The browser opens the login page on localhost port three thousand.",
+      "has_audio": true
+    },
+    {
+      "shot": "terminal",
+      "screen": "terminal",
+      "start": 48.4,
+      "end": 57.4,
+      "narration": "In the terminal we run pytest, and one test fails with a connection error.",
+      "has_audio": true
+    },
+    {
+      "shot": "outro",
+      "screen": "title",
+      "start": 57.4,
+      "end": 62.4,
+      "narration": "That concludes the review. Thank you.",
+      "has_audio": true
+    }
+  ],
+  "expected": {
+    "on_screen_text": [
+      "Revenue Rs 42L",
+      "localhost:3000/login",
+      "$ pytest -q tests/",
+      "ConnectionError",
+      "Competitor A charges $2 per hour of video"
+    ],
+    "spoken_phrases": [
+      "revenue",
+      "pricing",
+      "competitor",
+      "pytest"
+    ],
+    "silent_shot": "silence",
+    "min_scenes": 8
+  }
+}
