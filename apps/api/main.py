@@ -123,6 +123,39 @@ class AskResponse(BaseModel):
     evidence: list[SearchHit]
 
 
+# --- Context models ---
+
+
+class ContextRequest(BaseModel):
+    task: str
+    max_tokens: int = 4000
+    modalities: list[str] | None = None
+
+
+class ContextResponse(BaseModel):
+    task: str
+    task_type: str
+    confidence: float
+    context: str
+    profiles: dict[str, Any] = {}
+    evidence: list[SearchHit] = []
+    frames: list[dict[str, Any]] = []
+    global_context: dict[str, Any] | None = None
+    summaries: dict[str, str] = {}
+    token_estimate: int = 0
+
+
+class ProfileRequest(BaseModel):
+    profile_name: str
+    force: bool = False
+
+
+class ProfileResponse(BaseModel):
+    profile_name: str
+    profile: dict[str, Any] | None = None
+    available: bool = True
+
+
 class TimelineEntry(BaseModel):
     start: float
     end: float
@@ -455,6 +488,118 @@ async def get_frames(video_id: str) -> list[dict[str, Any]]:
         }
         for frame in doc.frames
     ]
+
+
+@app.post("/v1/videos/{video_id}/context", response_model=ContextResponse)
+async def get_context(video_id: str, request: ContextRequest) -> ContextResponse:
+    """Get optimized AI context for a task."""
+    doc = _get_doc(video_id)
+    video = load(doc=doc)
+
+    from videocontent.routing import ContextBudget
+
+    context = video.context_for(
+        request.task,
+        max_tokens=request.max_tokens,
+        modalities=request.modalities,
+    )
+
+    # Convert evidence to SearchHit format
+    evidence_hits = []
+    for span in context.evidence:
+        evidence_hits.append(SearchHit(
+            timecode=span.timecode,
+            start=span.start,
+            end=span.end,
+            modality=span.modality,
+            text=span.text,
+            score=span.score,
+            reason=span.reason,
+        ))
+
+    # Convert frames
+    frame_data = []
+    for frame in context.frames:
+        frame_data.append({
+            "id": frame.get("id", ""),
+            "ts": frame.get("ts", 0.0),
+            "path": frame.get("path", ""),
+            "reason": frame.get("reason", ""),
+        })
+
+    # Convert profiles to dict
+    profiles_dict = {}
+    for name, profile in context.profiles.items():
+        if hasattr(profile, "model_dump"):
+            profiles_dict[name] = profile.model_dump()
+        else:
+            profiles_dict[name] = str(profile)
+
+    # Convert global context
+    global_ctx = None
+    if context.global_context:
+        if hasattr(context.global_context, "model_dump"):
+            global_ctx = context.global_context.model_dump()
+        else:
+            global_ctx = context.global_context
+
+    # Convert summaries
+    summaries = context.summaries if context.summaries else {}
+
+    return ContextResponse(
+        task=context.task,
+        task_type=context.task_type.value if hasattr(context.task_type, "value") else str(context.task_type),
+        confidence=context.confidence,
+        context=context.context,
+        profiles=profiles_dict,
+        evidence=evidence_hits,
+        frames=frame_data,
+        global_context=global_ctx,
+        summaries=summaries,
+        token_estimate=context.token_estimate,
+    )
+
+
+@app.post("/v1/videos/{video_id}/profile", response_model=ProfileResponse)
+async def get_profile(video_id: str, request: ProfileRequest) -> ProfileResponse:
+    """Get a specific semantic profile."""
+    doc = _get_doc(video_id)
+    video = load(doc=doc)
+
+    try:
+        profile = video.profile(request.profile_name)
+        if hasattr(profile, "model_dump"):
+            profile_data = profile.model_dump()
+        else:
+            profile_data = profile
+        return ProfileResponse(
+            profile_name=request.profile_name,
+            profile=profile_data,
+            available=True,
+        )
+    except ValueError as e:
+        return ProfileResponse(
+            profile_name=request.profile_name,
+            profile=None,
+            available=False,
+        )
+
+
+@app.get("/v1/videos/{video_id}/profiles")
+async def list_profiles(video_id: str) -> dict[str, Any]:
+    """Get all available semantic profiles for this video."""
+    doc = _get_doc(video_id)
+    video = load(doc=doc)
+
+    profiles = video.profiles()
+    result = {}
+    for name, profile in profiles.items():
+        if hasattr(profile, "model_dump"):
+            result[name] = profile.model_dump()
+        else:
+            result[name] = str(profile)
+
+    return {"profiles": result}
 
 
 if __name__ == "__main__":

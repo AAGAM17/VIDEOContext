@@ -1,0 +1,88 @@
+{
+  "video": "tests/fixtures/demo.mp4",
+  "video_duration": 62.439,
+  "raw_tokens": 740,
+  "tasks": [
+    {
+      "task_type": "factual_retrieval",
+      "query": "What was the revenue mentioned?",
+      "raw_tokens": 740,
+      "optimized_tokens": 260,
+      "compression_ratio_pct": 64.86486486486487,
+      "selection_time_ms": 2.1948390058241785,
+      "profiles": [],
+      "evidence_count": 10,
+      "frame_count": 0
+    },
+    {
+      "task_type": "global_understanding",
+      "query": "What is this video about?",
+      "raw_tokens": 740,
+      "optimized_tokens": 276,
+      "compression_ratio_pct": 62.70270270270271,
+      "selection_time_ms": 1.855477996286936,
+      "profiles": [],
+      "evidence_count": 5,
+      "frame_count": 10
+    },
+    {
+      "task_type": "ui_recreation",
+      "query": "Recreate the website design language",
+      "raw_tokens": 740,
+      "optimized_tokens": 303,
+      "compression_ratio_pct": 59.05405405405406,
+      "selection_time_ms": 1.8075069965561852,
+      "profiles": [],
+      "evidence_count": 6,
+      "frame_count": 10
+    },
+    {
+      "task_type": "application_understanding",
+      "query": "How does this application work?",
+      "raw_tokens": 740,
+      "optimized_tokens": 76,
+      "compression_ratio_pct": 89.72972972972973,
+      "selection_time_ms": 1.4205079933162779,
+      "profiles": [],
+      "evidence_count": 1,
+      "frame_count": 0
+    },
+    {
+      "task_type": "interaction_analysis",
+      "query": "Describe the animations and transitions",
+      "raw_tokens": 740,
+      "optimized_tokens": 339,
+      "compression_ratio_pct": 54.18918918918919,
+      "selection_time_ms": 2.192769999965094,
+      "profiles": [],
+      "evidence_count": 10,
+      "frame_count": 10
+    }
+  ],
+  "profiles": [
+    {
+      "profile": "ui_design",
+      "generation_time_ms": 1.0007630044128746,
+      "supported": true
+    },
+    {
+      "profile": "application",
+      "generation_time_ms": 0,
+      "supported": false
+    },
+    {
+      "profile": "product_demo",
+      "generation_time_ms": 0.18330899183638394,
+      "supported": true
+    },
+    {
+      "profile": "tutorial",
+      "generation_time_ms": 0,
+      "supported": false
+    }
+  ],
+  "summary": {
+    "avg_compression_pct": 66.10810810810811,
+    "avg_selection_time_ms": 1.8942203983897343
+  }
+}

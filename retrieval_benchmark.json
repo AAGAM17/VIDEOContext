@@ -1,0 +1,78 @@
+{
+  "queries": [
+    {
+      "query": "revenue",
+      "description": "Revenue mention",
+      "total_matches": 5,
+      "top_5_hits": 5,
+      "modalities_found": [
+        "events",
+        "transcript",
+        "ocr"
+      ],
+      "top_score": 0.020491803278688527,
+      "avg_score": 0.02029559399998321
+    },
+    {
+      "query": "pricing",
+      "description": "Pricing discussion",
+      "total_matches": 14,
+      "top_5_hits": 5,
+      "modalities_found": [
+        "events",
+        "transcript",
+        "ocr"
+      ],
+      "top_score": 0.020491803278688527,
+      "avg_score": 0.020359598096245372
+    },
+    {
+      "query": "competitor",
+      "description": "Competitor mention",
+      "total_matches": 7,
+      "top_5_hits": 5,
+      "modalities_found": [
+        "events",
+        "transcript",
+        "ocr"
+      ],
+      "top_score": 0.020491803278688527,
+      "avg_score": 0.020359598096245372
+    },
+    {
+      "query": "dashboard",
+      "description": "Dashboard UI",
+      "total_matches": 0,
+      "top_5_hits": 0,
+      "modalities_found": [],
+      "top_score": 0,
+      "avg_score": 0
+    },
+    {
+      "query": "login",
+      "description": "Login screen",
+      "total_matches": 4,
+      "top_5_hits": 4,
+      "modalities_found": [
+        "events",
+        "transcript",
+        "ocr"
+      ],
+      "top_score": 0.020491803278688527,
+      "avg_score": 0.020409175039661557
+    },
+    {
+      "query": "demo",
+      "description": "Demo section",
+      "total_matches": 6,
+      "top_5_hits": 5,
+      "modalities_found": [
+        "events",
+        "transcript",
+        "ocr"
+      ],
+      "top_score": 0.020491803278688527,
+      "avg_score": 0.020233590031729243
+    }
+  ]
+}

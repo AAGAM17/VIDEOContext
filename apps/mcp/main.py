@@ -179,6 +179,42 @@ async def main():
                     "required": ["video_id", "question"],
                 },
             ),
+            Tool(
+                name="get_video_context",
+                description="Get optimized AI context for a specific task (e.g., 'recreate the design', 'understand the application')",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "task": {"type": "string", "description": "Task description (e.g., 'recreate the design language', 'understand the application')"},
+                        "max_tokens": {"type": "integer", "default": 4000, "description": "Max tokens for context"},
+                    },
+                    "required": ["video_id", "task"],
+                },
+            ),
+            Tool(
+                name="get_video_profile",
+                description="Get a specific semantic profile (ui_design, application, product_demo, tutorial)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "profile_name": {"type": "string", "description": "Profile name (ui_design, application, product_demo, tutorial)"},
+                    },
+                    "required": ["video_id", "profile_name"],
+                },
+            ),
+            Tool(
+                name="list_video_profiles",
+                description="List all available semantic profiles for a video",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                    },
+                    "required": ["video_id"],
+                },
+            ),
         ]
 
     @server.call_tool()
@@ -271,6 +307,31 @@ async def main():
                 answer = video.ask(question, top_k=top_k)
                 evidence = "\n".join(_format_span(e) for e in answer.evidence)
                 return CallToolResult(content=[TextContent(type="text", text=f"Q: {answer.question}\nA: {answer.answer}\nConfidence: {answer.confidence:.0%}\n\nEvidence:\n{evidence}")])
+
+            elif name == "get_video_context":
+                task = arguments.get("task", "")
+                max_tokens = arguments.get("max_tokens", 4000)
+                context = video.context_for(task, max_tokens=max_tokens)
+                evidence = "\n".join(_format_span(e) for e in context.evidence)
+                profiles = ", ".join(context.profiles.keys()) if context.profiles else "none"
+                return CallToolResult(content=[TextContent(type="text", text=f"Task: {context.task}\nType: {context.task_type.value if hasattr(context.task_type, 'value') else context.task_type}\nToken estimate: {context.token_estimate}\nProfiles: {profiles}\n\nContext:\n{context.context}")])
+
+            elif name == "get_video_profile":
+                profile_name = arguments.get("profile_name", "")
+                try:
+                    profile = video.profile(profile_name)
+                    if hasattr(profile, "model_dump"):
+                        profile_data = profile.model_dump()
+                    else:
+                        profile_data = str(profile)
+                    return CallToolResult(content=[TextContent(type="text", text=json.dumps(profile_data, indent=2, default=str))])
+                except ValueError as e:
+                    return CallToolResult(content=[TextContent(type="text", text=f"Error: {e}")])
+
+            elif name == "list_video_profiles":
+                profiles = video.profiles()
+                names = list(profiles.keys())
+                return CallToolResult(content=[TextContent(type="text", text=f"Available profiles: {', '.join(names) if names else 'none'}")])
 
             else:
                 return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {name}")])

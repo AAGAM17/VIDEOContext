@@ -324,6 +324,185 @@ class Metrics(VctxModel):
     peak_memory_mb: float | None = None
 
 
+# ---------------------------------------------------------------------------
+# Multi-Resolution Context (v1.1+)
+# ---------------------------------------------------------------------------
+
+
+class GlobalContext(VctxModel):
+    """Global semantic understanding of the entire video."""
+
+    summary: str | None = None
+    one_line: str | None = None
+    domain: str | None = None
+    major_topics: list[str] = Field(default_factory=list)
+    visual_language: list[str] = Field(default_factory=list)
+    interaction_language: list[str] = Field(default_factory=list)
+
+
+class VisualStyleProfile(VctxModel):
+    """Visual style characteristics."""
+
+    overall: list[str] = Field(default_factory=list)
+    color_characteristics: list[str] = Field(default_factory=list)
+    surface_style: list[str] = Field(default_factory=list)
+    confidence: Confidence = None
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class TypographyProfile(VctxModel):
+    """Typography characteristics."""
+
+    hierarchy: str | None = None
+    heading_style: str | None = None
+    density: str | None = None
+    confidence: Confidence = None
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class LayoutProfile(VctxModel):
+    """Layout patterns."""
+
+    patterns: list[str] = Field(default_factory=list)
+    confidence: Confidence = None
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class ComponentProfile(VctxModel):
+    """UI component pattern."""
+
+    component_id: str
+    type: str
+    first_seen: float
+    last_seen: float
+    visual_characteristics: list[str] = Field(default_factory=list)
+    content_structure: list[str] = Field(default_factory=list)
+    confidence: Confidence = None
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class InteractionProfile(VctxModel):
+    """Interaction pattern."""
+
+    type: str | None = None
+    pattern: str | None = None
+    confidence: Confidence = None
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class MotionProfile(VctxModel):
+    """Motion/animation pattern."""
+
+    motion_id: str
+    element: str | None = None
+    type: str
+    direction: str | None = None
+    style: str | None = None
+    duration_category: str | None = None
+    confidence: Confidence = None
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class UIDesignProfile(VctxModel):
+    """Complete UI/Design profile for interface videos."""
+
+    visual_style: VisualStyleProfile = Field(default_factory=VisualStyleProfile)
+    typography: TypographyProfile = Field(default_factory=TypographyProfile)
+    layout: LayoutProfile = Field(default_factory=LayoutProfile)
+    components: list[ComponentProfile] = Field(default_factory=list)
+    interaction: InteractionProfile = Field(default_factory=InteractionProfile)
+    motion: list[MotionProfile] = Field(default_factory=list)
+
+
+class ApplicationProfile(VctxModel):
+    """Application understanding profile."""
+
+    overview: str | None = None
+    screen_hierarchy: list[dict[str, Any]] = Field(default_factory=list)
+    user_flows: list[dict[str, Any]] = Field(default_factory=list)
+    state_transitions: list[dict[str, Any]] = Field(default_factory=list)
+    important_interactions: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class ProductDemoProfile(VctxModel):
+    """Product demonstration profile."""
+
+    product_overview: str | None = None
+    features_shown: list[str] = Field(default_factory=list)
+    use_cases: list[str] = Field(default_factory=list)
+    ui_walkthrough: list[dict[str, Any]] = Field(default_factory=list)
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class TutorialProfile(VctxModel):
+    """Tutorial/educational profile."""
+
+    topic: str | None = None
+    learning_objectives: list[str] = Field(default_factory=list)
+    steps: list[dict[str, Any]] = Field(default_factory=list)
+    key_concepts: list[str] = Field(default_factory=list)
+    evidence: list[TimeSpan] = Field(default_factory=list)
+
+
+class SemanticProfiles(VctxModel):
+    """Container for all semantic profiles."""
+
+    ui_design: UIDesignProfile | None = None
+    application: ApplicationProfile | None = None
+    product_demo: ProductDemoProfile | None = None
+    tutorial: TutorialProfile | None = None
+
+
+class InteractionNode(VctxModel):
+    """A state in the interaction graph."""
+
+    state_id: str
+    name: str
+    start: float
+    end: float
+    description: str | None = None
+
+
+class InteractionEdge(VctxModel):
+    """A transition between states."""
+
+    from_state: str
+    to_state: str
+    action: str
+    start: float
+    end: float
+    confidence: Confidence = None
+
+
+class InteractionGraph(VctxModel):
+    """State transition graph for the video."""
+
+    nodes: list[InteractionNode] = Field(default_factory=list)
+    edges: list[InteractionEdge] = Field(default_factory=list)
+
+
+class VisualState(VctxModel):
+    """A persistent visual state detected over a time interval."""
+
+    state_id: str
+    name: str
+    start: float
+    end: float
+    persistent_elements: list[str] = Field(default_factory=list)
+    changes: list[dict[str, Any]] = Field(default_factory=list)
+    confidence: Confidence = None
+
+
+class ContextSummaries(VctxModel):
+    """Multi-level summaries for context budgeting."""
+
+    one_line: str | None = None
+    short: str | None = None
+    detailed: str | None = None
+    structured: dict[str, Any] = Field(default_factory=dict)
+
+
 class Producer(VctxModel):
     name: str = "videocontent"
     version: str = "0.1.0"
@@ -357,6 +536,13 @@ class VideoContextDocument(VctxModel):
 
     embeddings: EmbeddingIndex | None = None
     metrics: Metrics = Field(default_factory=Metrics)
+
+    # Multi-resolution context (v1.1+)
+    global_context: GlobalContext | None = None
+    semantic_profiles: SemanticProfiles | None = None
+    interaction_graph: InteractionGraph | None = None
+    visual_states: list[VisualState] = Field(default_factory=list)
+    context_summaries: ContextSummaries | None = None
 
     # -- convenience -------------------------------------------------------
 
@@ -453,4 +639,22 @@ __all__ = [
     "VideoInfo",
     "VisionNote",
     "Word",
+    # Multi-resolution (v1.1+)
+    "GlobalContext",
+    "VisualStyleProfile",
+    "TypographyProfile",
+    "LayoutProfile",
+    "ComponentProfile",
+    "InteractionProfile",
+    "MotionProfile",
+    "UIDesignProfile",
+    "ApplicationProfile",
+    "ProductDemoProfile",
+    "TutorialProfile",
+    "SemanticProfiles",
+    "InteractionNode",
+    "InteractionEdge",
+    "InteractionGraph",
+    "VisualState",
+    "ContextSummaries",
 ]

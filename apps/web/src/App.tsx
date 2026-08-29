@@ -3,6 +3,7 @@ import { VideoUpload } from './components/VideoUpload'
 import { VideoExplorer } from './components/VideoExplorer'
 import { VideoSearch } from './components/VideoSearch'
 import { VideoAsk } from './components/VideoAsk'
+import { VideoIntelligence } from './components/VideoIntelligence'
 import { ProcessingStatus } from './components/ProcessingStatus'
 
 interface VideoData {
@@ -16,7 +17,7 @@ interface VideoData {
 
 function App() {
   const [video, setVideo] = useState<VideoData | null>(null)
-  const [activeTab, setActiveTab] = useState<'explorer' | 'search' | 'ask'>('explorer')
+  const [activeTab, setActiveTab] = useState<'explorer' | 'search' | 'ask' | 'intelligence'>('explorer')
 
   const handleUpload = async (file: File) => {
     const formData = new FormData()
@@ -116,6 +117,16 @@ function App() {
                 >
                   Ask AI
                 </button>
+                <button
+                  onClick={() => setActiveTab('intelligence')}
+                  className={`px-4 py-2 text-sm font-medium rounded-t-lg transition-colors ${
+                    activeTab === 'intelligence'
+                      ? 'bg-gray-800 text-white'
+                      : 'text-gray-400 hover:text-gray-200'
+                  }`}
+                >
+                  Intelligence
+                </button>
               </nav>
             </div>
 
@@ -123,6 +134,7 @@ function App() {
               {activeTab === 'explorer' && <VideoExplorer videoId={video.videoId} />}
               {activeTab === 'search' && <VideoSearch videoId={video.videoId} />}
               {activeTab === 'ask' && <VideoAsk videoId={video.videoId} />}
+              {activeTab === 'intelligence' && <VideoIntelligence videoId={video.videoId} />}
             </div>
           </>
         ) : (

@@ -16,6 +16,8 @@ obvious spelling::
     print(video.at("03:21").spans)
 
     answer = video.ask("What was the revenue?")  # → Answer with evidence
+    context = video.context_for("Recreate the design")  # → Optimized AI context
+    profile = video.profile("ui_design")         # → UI Design profile
 
 Processing is never implicit. ``Video("demo.mp4").search(...)`` raises rather than quietly
 spending thirty seconds of CPU on attribute access — a property that transcodes a video is a
@@ -37,6 +39,7 @@ from .timecode import parse_timecode
 
 if TYPE_CHECKING:  # pragma: no cover - import cost paid only when searching
     from .retrieval.query import Retriever, SearchResult
+    from .routing import TaskClassification, ContextBudget
 
 log = get_logger("sdk")
 
@@ -57,6 +60,41 @@ class Answer:
             "answer": self.answer,
             "confidence": self.confidence,
             "evidence": [span.to_dict() if hasattr(span, "to_dict") else str(span) for span in self.evidence],
+        }
+
+
+@dataclass(frozen=True)
+class OptimizedContext:
+    """Optimized AI context for a specific task.
+
+    Contains the task classification, selected semantic profiles,
+    evidence, representative frames, and a packed context string
+    ready to send to an LLM.
+    """
+
+    task: str
+    task_type: Any  # TaskClassification enum
+    confidence: float
+    context: str
+    profiles: dict[str, Any]
+    evidence: list[Any]
+    frames: list[Any]
+    global_context: Any | None
+    summaries: dict[str, str]
+    token_estimate: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "task": self.task,
+            "task_type": self.task_type.value if hasattr(self.task_type, "value") else str(self.task_type),
+            "confidence": self.confidence,
+            "context": self.context,
+            "profiles": {k: v.model_dump() if hasattr(v, "model_dump") else str(v) for k, v in self.profiles.items()},
+            "evidence": [e.to_dict() if hasattr(e, "to_dict") else str(e) for e in self.evidence],
+            "frames": self.frames,
+            "global_context": self.global_context.model_dump() if hasattr(self.global_context, "model_dump") else self.global_context,
+            "summaries": self.summaries,
+            "token_estimate": self.token_estimate,
         }
 
 #: What ``save()`` writes when given no path. ``demo.mp4`` → ``demo.vctx`` (§50).
@@ -277,6 +315,147 @@ class Video:
             spans=list(search_result.spans),
         )
 
+    # -- Semantic Context ----------------------------------------------------
+
+    def context(
+        self,
+        task: str,
+        *,
+        max_tokens: int = 4000,
+        modalities: list[str] | None = None,
+    ) -> "OptimizedContext":
+        """Get optimized AI context for a specific task.
+
+        This is the main entry point for multi-resolution context.
+        It classifies the task, selects optimal representations,
+        and returns packed context ready for an LLM.
+
+        Args:
+            task: Natural language description of what you want to do.
+                  Examples:
+                  - "What was the revenue?"
+                  - "Recreate the website design"
+                  - "How does this application work?"
+                  - "Describe the animations"
+            max_tokens: Maximum tokens for the returned context.
+            modalities: Optional modality filter for evidence retrieval.
+
+        Returns:
+            OptimizedContext with task classification, selected profiles,
+            evidence, frames, and packed context string.
+        """
+        from .routing import (
+            classify_task,
+            select_context,
+            ContextBudget,
+            pack_context,
+            TaskClassification,
+        )
+
+        if not self.processed:
+            raise NotProcessedError(
+                f"{self.source.name} has not been processed",
+                hint="call video.process() first",
+            )
+
+        task_classification: TaskClassification = classify_task(task, self.document)
+        budget = ContextBudget(max_tokens=max_tokens)
+
+        selection = select_context(
+            self.document,
+            task_classification,
+            budget,
+            query=task if task_classification.requires_evidence else None,
+        )
+
+        # Pack into LLM-ready context
+        packed_context = pack_context(selection, task_classification.task_type.value, task)
+
+        return OptimizedContext(
+            task=task,
+            task_type=task_classification.task_type,
+            confidence=task_classification.confidence,
+            context=packed_context,
+            profiles=selection["profiles"],
+            evidence=selection["evidence"],
+            frames=selection["frames"],
+            global_context=selection["global_context"],
+            summaries=selection["summaries"],
+            token_estimate=selection["token_estimate"],
+        )
+
+    def context_for(
+        self,
+        task: str,
+        *,
+        max_tokens: int = 4000,
+        modalities: list[str] | None = None,
+    ) -> "OptimizedContext":
+        """Alias for context() - more natural for task-oriented usage."""
+        return self.context(task, max_tokens=max_tokens, modalities=modalities)
+
+    def profile(
+        self,
+        profile_name: str,
+        *,
+        force: bool = False,
+    ) -> Any:
+        """Get a specific semantic profile by name.
+
+        Available profiles: ui_design, application, product_demo, tutorial
+
+        Args:
+            profile_name: Name of the profile to generate.
+            force: If True, rebuild even if cached.
+
+        Returns:
+            The profile object (Pydantic model) or None if not applicable.
+        """
+        from .profiles import get_profile_builder, ProfileContext
+
+        if not self.processed:
+            raise NotProcessedError(
+                f"{self.source.name} has not been processed",
+                hint="call video.process() first",
+            )
+
+        try:
+            builder_cls = get_profile_builder(profile_name)
+            builder = builder_cls()
+            profile_ctx = ProfileContext(doc=self.document, config=self.config.model_dump())
+            return builder.build(profile_ctx)
+        except ValueError:
+            available = ", ".join(["ui_design", "application", "product_demo", "tutorial"])
+            raise ValueError(f"Unknown profile: {profile_name}. Available: {available}")
+
+    def profiles(self) -> dict[str, Any]:
+        """Get all available semantic profiles for this video.
+
+        Returns:
+            Dict mapping profile names to their generated objects.
+        """
+        from .profiles import list_profiles, get_profile_builder, ProfileContext
+
+        if not self.processed:
+            raise NotProcessedError(
+                f"{self.source.name} has not been processed",
+                hint="call video.process() first",
+            )
+
+        results = {}
+        profile_ctx = ProfileContext(doc=self.document, config=self.config.model_dump())
+
+        for name in list_profiles():
+            try:
+                builder_cls = get_profile_builder(name)
+                builder = builder_cls()
+                if builder.supports(profile_ctx):
+                    results[name] = builder.build(profile_ctx)
+            except Exception:
+                pass
+
+        return results
+
 
 def _seconds(ts: float | str) -> float:
     """A timestamp as a number, from either a number or a timecode a person typed."""
@@ -310,4 +489,4 @@ def process(
     return video
 
 
-__all__ = ["VCTX_SUFFIX", "NotProcessedError", "Video", "load", "process", "Answer"]
+__all__ = ["VCTX_SUFFIX", "NotProcessedError", "Video", "load", "process", "Answer", "OptimizedContext"]
