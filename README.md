@@ -243,7 +243,7 @@ The implementation instructs the LLM to answer only from the retrieved evidence 
 ## Core package
 
 ```bash
-pip install videocontext
+pip install videocontent
 ```
 
 The core package is intentionally lightweight.
@@ -251,49 +251,49 @@ The core package is intentionally lightweight.
 ## Speech-to-text
 
 ```bash
-pip install "videocontext[asr]"
+pip install "videocontent[asr]"
 ```
 
 ## OCR
 
 ```bash
-pip install "videocontext[ocr]"
+pip install "videocontent[ocr]"
 ```
 
 ## Vision adapters
 
 ```bash
-pip install "videocontext[vision]"
+pip install "videocontent[vision]"
 ```
 
 ## Vector retrieval
 
 ```bash
-pip install "videocontext[vectors]"
+pip install "videocontent[vectors]"
 ```
 
 ## Embeddings
 
 ```bash
-pip install "videocontext[embeddings]"
+pip install "videocontent[embeddings]"
 ```
 
 ## REST API
 
 ```bash
-pip install "videocontext[api]"
+pip install "videocontent[api]"
 ```
 
 ## MCP server
 
 ```bash
-pip install "videocontext[mcp]"
+pip install "videocontent[mcp]"
 ```
 
 ## Main optional processing stack
 
 ```bash
-pip install "videocontext[all]"
+pip install "videocontent[all]"
 ```
 
 For development:
@@ -330,7 +330,7 @@ sudo apt install tesseract-ocr
 Check your environment:
 
 ```bash
-videocontext doctor
+videocontent doctor
 ```
 
 The doctor command checks the available runtime capabilities, including:
@@ -349,7 +349,7 @@ The doctor command checks the available runtime capabilities, including:
 ## Process a video
 
 ```python
-from videocontext import Video
+from videocontent import Video
 
 video = Video("demo.mp4")
 
@@ -369,9 +369,9 @@ demo.vctx
 You can also process and save in one workflow:
 
 ```python
-import videocontext
+import videocontent
 
-video = videocontext.process(
+video = videocontent.process(
     "demo.mp4",
     output=True,
 )
@@ -382,7 +382,7 @@ video = videocontext.process(
 # Search a Video
 
 ```python
-from videocontext import Video
+from videocontent import Video
 
 video = Video("demo.mp4")
 
@@ -488,7 +488,7 @@ snapshot = video.at(
 Once a video has been processed, the original video is not required for retrieval.
 
 ```python
-from videocontext import load
+from videocontent import load
 
 video = load("demo.vctx")
 
@@ -507,7 +507,7 @@ This allows `.vctx` documents to be shared and queried independently of the orig
 VideoContext can retrieve evidence and use an LLM to answer questions.
 
 ```python
-from videocontext import Video
+from videocontent import Video
 
 video = Video("lecture.mp4")
 
@@ -558,7 +558,7 @@ spans
 VideoContext provides two CLI entry points:
 
 ```bash
-videocontext
+videocontent
 ```
 
 and:
@@ -570,7 +570,7 @@ vctx
 ## Process a video
 
 ```bash
-videocontext process demo.mp4
+videocontent process demo.mp4
 ```
 
 This creates:
@@ -582,21 +582,21 @@ demo.vctx
 Specify an output location:
 
 ```bash
-videocontext process demo.mp4 \
+videocontent process demo.mp4 \
   --output output.vctx
 ```
 
 Write compressed output:
 
 ```bash
-videocontext process demo.mp4 \
+videocontent process demo.mp4 \
   --gzip
 ```
 
 Machine-readable output:
 
 ```bash
-videocontext process demo.mp4 \
+videocontent process demo.mp4 \
   --json
 ```
 
@@ -605,48 +605,48 @@ videocontext process demo.mp4 \
 ## Inspect a `.vctx`
 
 ```bash
-videocontext inspect demo.vctx
+videocontent inspect demo.vctx
 ```
 
 Inspect the transcript:
 
 ```bash
-videocontext inspect demo.vctx \
+videocontent inspect demo.vctx \
   --transcript
 ```
 
 Inspect OCR:
 
 ```bash
-videocontext inspect demo.vctx \
+videocontent inspect demo.vctx \
   --ocr
 ```
 
 Inspect events:
 
 ```bash
-videocontext inspect demo.vctx \
+videocontent inspect demo.vctx \
   --events
 ```
 
 Inspect segments:
 
 ```bash
-videocontext inspect demo.vctx \
+videocontent inspect demo.vctx \
   --segments
 ```
 
 Inspect everything:
 
 ```bash
-videocontext inspect demo.vctx \
+videocontent inspect demo.vctx \
   --all
 ```
 
 Machine-readable output:
 
 ```bash
-videocontext inspect demo.vctx \
+videocontent inspect demo.vctx \
   --json
 ```
 
@@ -655,7 +655,7 @@ videocontext inspect demo.vctx \
 ## Search
 
 ```bash
-videocontext search \
+videocontent search \
   demo.vctx \
   "pricing"
 ```
@@ -663,7 +663,7 @@ videocontext search \
 Restrict results:
 
 ```bash
-videocontext search \
+videocontent search \
   demo.vctx \
   "competitor" \
   --modality transcript \
@@ -674,7 +674,7 @@ videocontext search \
 Search a time range:
 
 ```bash
-videocontext search \
+videocontent search \
   demo.vctx \
   "pricing" \
   --from 10:00 \
@@ -684,7 +684,7 @@ videocontext search \
 JSON output:
 
 ```bash
-videocontext search \
+videocontent search \
   demo.vctx \
   "pricing" \
   --json
@@ -695,7 +695,7 @@ videocontext search \
 ## Inspect a Moment
 
 ```bash
-videocontext at \
+videocontent at \
   demo.vctx \
   03:21
 ```
@@ -703,7 +703,7 @@ videocontext at \
 Include nearby evidence:
 
 ```bash
-videocontext at \
+videocontent at \
   demo.vctx \
   03:21 \
   --window 5
@@ -714,7 +714,7 @@ videocontext at \
 ## Ask Questions
 
 ```bash
-videocontext ask \
+videocontent ask \
   demo.vctx \
   "What was the revenue?"
 ```
@@ -722,7 +722,7 @@ videocontext ask \
 Restrict the evidence:
 
 ```bash
-videocontext ask \
+videocontent ask \
   demo.vctx \
   "What pricing was discussed?" \
   --modality transcript \
@@ -733,7 +733,7 @@ videocontext ask \
 JSON output:
 
 ```bash
-videocontext ask \
+videocontent ask \
   demo.vctx \
   "What was the revenue?" \
   --json
@@ -744,13 +744,13 @@ videocontext ask \
 ## Check Your Environment
 
 ```bash
-videocontext doctor
+videocontent doctor
 ```
 
 Machine-readable output:
 
 ```bash
-videocontext doctor \
+videocontent doctor \
   --json
 ```
 
@@ -875,7 +875,7 @@ apps/api
 Install API dependencies:
 
 ```bash
-pip install "videocontext[api]"
+pip install "videocontent[api]"
 ```
 
 Run the API:
@@ -1036,7 +1036,7 @@ apps/mcp
 Install MCP dependencies:
 
 ```bash
-pip install "videocontext[mcp]"
+pip install "videocontent[mcp]"
 ```
 
 The MCP server exposes processed video context to MCP-compatible AI applications and agents.
@@ -1277,7 +1277,7 @@ flowchart LR
 VideoContext uses `ProcessingConfig`.
 
 ```python
-from videocontext import ProcessingConfig, Video
+from videocontent import ProcessingConfig, Video
 
 config = ProcessingConfig()
 
@@ -1294,7 +1294,7 @@ Configuration can also be provided through CLI configuration and overrides.
 Example:
 
 ```bash
-videocontext \
+videocontent \
   --set sampling.mode=adaptive \
   process demo.mp4
 ```
@@ -1302,7 +1302,7 @@ videocontext \
 The CLI also supports a YAML configuration file:
 
 ```bash
-videocontext \
+videocontent \
   --config config.yaml \
   process demo.mp4
 ```
@@ -1348,7 +1348,7 @@ flowchart TB
     APPS --> MCP["mcp"]
     APPS --> WEB["web"]
 
-    ROOT --> SRC["src/videocontext"]
+    ROOT --> SRC["src/videocontent"]
 
     SRC --> CLI["cli"]
     SRC --> EMB["embeddings"]
@@ -1370,7 +1370,7 @@ The applications and core library are separated.
 The main package lives under:
 
 ```text
-src/videocontext
+src/videocontent
 ```
 
 Applications live under:
