@@ -20,11 +20,11 @@ import json
 
 import pytest
 
-from videocontent.config import RetrievalConfig
-from videocontent.retrieval import Retriever, at, build_records, search
-from videocontent.retrieval.fusion import Candidate, boost_cooccurrence, merge_adjacent, rrf
-from videocontent.retrieval.index import Record
-from videocontent.schema.v1 import (
+from videocontext.config import RetrievalConfig
+from videocontext.retrieval import Retriever, at, build_records, search
+from videocontext.retrieval.fusion import Candidate, boost_cooccurrence, merge_adjacent, rrf
+from videocontext.retrieval.index import Record
+from videocontext.schema.v1 import (
     Event,
     OCRText,
     Segment,
@@ -33,7 +33,7 @@ from videocontent.schema.v1 import (
     VideoInfo,
     VisionNote,
 )
-from videocontent.timecode import format_timecode
+from videocontext.timecode import format_timecode
 
 DURATION = 60.0
 

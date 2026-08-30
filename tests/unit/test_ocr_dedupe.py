@@ -7,9 +7,9 @@ screen, which is the one thing the evidence-first contract forbids.
 
 from __future__ import annotations
 
-from videocontent.config import OCRConfig
-from videocontent.interfaces import OCRObservation
-from videocontent.processing.ocr import deduplicate, iou, normalize, similarity
+from videocontext.config import OCRConfig
+from videocontext.interfaces import OCRObservation
+from videocontext.processing.ocr import deduplicate, iou, normalize, similarity
 
 
 def obs(text: str, ts: float, bbox=(100.0, 200.0, 300.0, 240.0), conf=0.9, **kw):

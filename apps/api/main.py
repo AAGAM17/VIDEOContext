@@ -25,9 +25,9 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
-from videocontent.config import ProcessingConfig, load_config
-from videocontent.sdk import Video, load, process
-from videocontent.schema.v1 import VideoContextDocument
+from videocontext.config import ProcessingConfig, load_config
+from videocontext.sdk import Video, load, process
+from videocontext.schema.v1 import VideoContextDocument
 
 # In-memory job store (replace with Redis in production)
 jobs: dict[str, dict[str, Any]] = {}
@@ -196,7 +196,7 @@ async def health() -> dict[str, str]:
 async def ready() -> dict[str, str]:
     """Readiness check endpoint."""
     # Check if we can process videos (FFmpeg available)
-    from videocontent.media import ffmpeg
+    from videocontext.media import ffmpeg
 
     if not ffmpeg.available():
         return JSONResponse(
@@ -496,7 +496,7 @@ async def get_context(video_id: str, request: ContextRequest) -> ContextResponse
     doc = _get_doc(video_id)
     video = load(doc=doc)
 
-    from videocontent.routing import ContextBudget
+    from videocontext.routing import ContextBudget
 
     context = video.context_for(
         request.task,

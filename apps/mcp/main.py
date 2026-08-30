@@ -29,8 +29,8 @@ from mcp.types import (
     Tool,
 )
 
-from videocontent import load
-from videocontent.schema.v1 import VideoContextDocument
+from videocontext import load
+from videocontext.schema.v1 import VideoContextDocument
 
 # Global document cache
 _docs: dict[str, VideoContextDocument] = {}

@@ -21,13 +21,13 @@ from itertools import pairwise
 
 import pytest
 
-from videocontent.config import SegmentConfig
-from videocontent.processing.segments import (
+from videocontext.config import SegmentConfig
+from videocontext.processing.segments import (
     build_segments,
     plan_windows,
     project_text,
 )
-from videocontent.schema.v1 import (
+from videocontext.schema.v1 import (
     Event,
     Frame,
     OCRText,

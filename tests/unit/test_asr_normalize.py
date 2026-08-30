@@ -7,8 +7,8 @@ malformation that must be repaired, or a piece of engine output that must surviv
 
 from __future__ import annotations
 
-from videocontent.processing.asr import finalize, utterance
-from videocontent.schema.v1 import Word
+from videocontext.processing.asr import finalize, utterance
+from videocontext.schema.v1 import Word
 
 
 def word(text: str, start: float, end: float, conf: float | None = None) -> Word:

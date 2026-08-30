@@ -11,8 +11,8 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from videocontent.interfaces import FrameImage
-from videocontent.processing.ocr.runs import (
+from videocontext.interfaces import FrameImage
+from videocontext.processing.ocr.runs import (
     SIGNATURE_SIZE,
     group_runs,
     signature,

@@ -3,7 +3,7 @@ requires = ["hatchling>=1.24"]
 build-backend = "hatchling.build"
 
 [project]
-name = "videocontent"
+name = "videocontext"
 version = "0.1.0"
 description = "The open-source semantic layer for video — turn video into timestamped, searchable context for AI agents and applications."
 readme = "README.md"
@@ -48,11 +48,11 @@ dev = [
   "mypy>=1.10",
   "types-pyyaml",
 ]
-all = ["videocontent[asr,ocr,vision,api]"]
+all = ["videocontext[asr,ocr,vision,api]"]
 
 [project.scripts]
-videocontent = "videocontent.cli:main"
-vctx = "videocontent.cli:main"
+videocontext = "videocontext.cli:main"
+vctx = "videocontext.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/AAGAM17/VIDEOContext"
@@ -60,7 +60,7 @@ Documentation = "https://github.com/AAGAM17/VIDEOContext/tree/main/docs"
 Issues = "https://github.com/AAGAM17/VIDEOContext/issues"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/videocontent"]
+packages = ["src/videocontext"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
