@@ -7,7 +7,7 @@ what makes the local-first promise (brief §21) hold for speech, the most expens
 Three details here are not incidental:
 
 * **The import is lazy.** ``faster-whisper`` pulls in CTranslate2 and tokenizers, ~100 MB of
-  wheels. ``import videocontext`` must not pay for that, so nothing is imported at module
+  wheels. ``import videocontent`` must not pay for that, so nothing is imported at module
   scope and :meth:`available` answers by looking for the module rather than loading it.
 * **Models are cached across videos.** Loading ``base`` costs seconds; a batch run would pay
   that per file. The cache is keyed on everything that changes the weights.

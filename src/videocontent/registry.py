@@ -6,7 +6,7 @@ a YAML file or a CLI flag. Registration supports two forms:
 * eager — ``@register_ocr("tesseract")`` on a class in this codebase
 * lazy — a ``"module:attr"`` spec, imported only when the plugin is actually instantiated
 
-The lazy form is what keeps ``import videocontext`` fast and the base install small: the
+The lazy form is what keeps ``import videocontent`` fast and the base install small: the
 faster-whisper adapter's dependencies are not touched unless ASR actually runs.
 """
 
@@ -31,7 +31,7 @@ _REGISTRY: dict[Capability, dict[str, Factory | str]] = {}
 _ALIASES: dict[Capability, dict[str, str]] = {}
 _ENTRYPOINTS_LOADED = False
 
-ENTRYPOINT_GROUP = "videocontext.plugins"
+ENTRYPOINT_GROUP = "videocontent.plugins"
 
 CAPABILITIES = (
     "sampler",
@@ -49,43 +49,43 @@ CAPABILITIES = (
 #: Built-ins, declared lazily so heavy adapters stay unimported until used.
 _BUILTINS: dict[Capability, dict[str, str]] = {
     "sampler": {
-        "fixed": "videocontext.processing.sampling.fixed:FixedSampler",
-        "scene": "videocontext.processing.sampling.scene:SceneSampler",
-        "adaptive": "videocontext.processing.sampling.adaptive:AdaptiveSampler",
+        "fixed": "videocontent.processing.sampling.fixed:FixedSampler",
+        "scene": "videocontent.processing.sampling.scene:SceneSampler",
+        "adaptive": "videocontent.processing.sampling.adaptive:AdaptiveSampler",
     },
     "scene_detector": {
-        "ffmpeg": "videocontext.processing.scenes.ffmpeg_scene:FFmpegSceneDetector",
-        "null": "videocontext.processing.scenes.null:NullSceneDetector",
+        "ffmpeg": "videocontent.processing.scenes.ffmpeg_scene:FFmpegSceneDetector",
+        "null": "videocontent.processing.scenes.null:NullSceneDetector",
     },
     "ocr": {
-        "tesseract": "videocontext.processing.ocr.tesseract:TesseractOCR",
-        "null": "videocontext.processing.ocr.null:NullOCR",
+        "tesseract": "videocontent.processing.ocr.tesseract:TesseractOCR",
+        "null": "videocontent.processing.ocr.null:NullOCR",
     },
     "asr": {
-        "faster-whisper": "videocontext.processing.asr.faster_whisper:FasterWhisperASR",
-        "subtitles": "videocontext.processing.asr.subtitles:SubtitleASR",
-        "null": "videocontext.processing.asr.null:NullASR",
+        "faster-whisper": "videocontent.processing.asr.faster_whisper:FasterWhisperASR",
+        "subtitles": "videocontent.processing.asr.subtitles:SubtitleASR",
+        "null": "videocontent.processing.asr.null:NullASR",
     },
     "vision": {
-        "null": "videocontext.processing.vision.null:NullVision",
-        "openai": "videocontext.processing.vision.remote:OpenAIVision",
-        "gemini": "videocontext.processing.vision.remote:GeminiVision",
-        "local-vlm": "videocontext.processing.vision.remote:LocalVLMVision",
+        "null": "videocontent.processing.vision.null:NullVision",
+        "openai": "videocontent.processing.vision.remote:OpenAIVision",
+        "gemini": "videocontent.processing.vision.remote:GeminiVision",
+        "local-vlm": "videocontent.processing.vision.remote:LocalVLMVision",
     },
     "event_detector": {
-        "rules": "videocontext.processing.events.rules:RuleEventDetector",
+        "rules": "videocontent.processing.events.rules:RuleEventDetector",
     },
     "embedding": {
-        "local": "videocontext.embeddings.local:LocalEmbeddings",
+        "local": "videocontent.embeddings.local:LocalEmbeddings",
     },
     "vector_store": {
-        "faiss": "videocontext.storage.faiss_store:FAISSStore",
-        "qdrant": "videocontext.storage.qdrant_store:QdrantStore",
+        "faiss": "videocontent.storage.faiss_store:FAISSStore",
+        "qdrant": "videocontent.storage.qdrant_store:QdrantStore",
     },
     "llm": {
-        "openai": "videocontext.llm.openai_llm:OpenAILLM",
-        "local": "videocontext.llm.local:LocalLLM",
-        "null": "videocontext.llm.null:NullLLM",
+        "openai": "videocontent.llm.openai_llm:OpenAILLM",
+        "local": "videocontent.llm.local:LocalLLM",
+        "null": "videocontent.llm.null:NullLLM",
     },
     "storage": {},
 }

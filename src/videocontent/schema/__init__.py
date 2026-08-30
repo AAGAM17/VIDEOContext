@@ -2,7 +2,7 @@
 
 Import surface for the schema layer::
 
-    from videocontext.schema import VideoContextDocument, load, save, validate
+    from videocontent.schema import VideoContextDocument, load, save, validate
 """
 
 from __future__ import annotations

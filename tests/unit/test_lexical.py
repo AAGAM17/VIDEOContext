@@ -21,8 +21,8 @@ from __future__ import annotations
 
 import pytest
 
-from videocontext.retrieval.index import Record
-from videocontext.retrieval.lexical import LexicalIndex, tokenize
+from videocontent.retrieval.index import Record
+from videocontent.retrieval.lexical import LexicalIndex, tokenize
 
 
 def record(key: str, text: str, modality: str = "transcript", start: float = 0.0) -> Record:

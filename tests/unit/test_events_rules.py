@@ -16,14 +16,14 @@ from __future__ import annotations
 
 import pytest
 
-from videocontext.interfaces import EventDetector, FrameContext
-from videocontext.processing.events.rules import (
+from videocontent.interfaces import EventDetector, FrameContext
+from videocontent.processing.events.rules import (
     RuleEventDetector,
     _command_in,
     _error_in,
 )
-from videocontext.registry import create
-from videocontext.schema.v1 import (
+from videocontent.registry import create
+from videocontent.schema.v1 import (
     OCRText,
     Scene,
     Utterance,

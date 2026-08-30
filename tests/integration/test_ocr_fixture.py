@@ -27,13 +27,13 @@ import pytest
 # (its directory goes on sys.path under the default `prepend` import mode). Importing the gates
 # rather than re-deriving them keeps one definition of "is tesseract installed".
 from conftest import needs_demo, needs_ffmpeg, needs_tesseract
-from videocontext.config import ProcessingConfig
-from videocontext.interfaces import FrameContext
-from videocontext.media.frames import extract_plan
-from videocontext.media.probe import probe
-from videocontext.processing.ocr import deduplicate, normalize
-from videocontext.processing.ocr.tesseract import TesseractOCR
-from videocontext.processing.sampling.fixed import FixedSampler
+from videocontent.config import ProcessingConfig
+from videocontent.interfaces import FrameContext
+from videocontent.media.frames import extract_plan
+from videocontent.media.probe import probe
+from videocontent.processing.ocr import deduplicate, normalize
+from videocontent.processing.ocr.tesseract import TesseractOCR
+from videocontent.processing.sampling.fixed import FixedSampler
 
 pytestmark = [pytest.mark.integration, needs_ffmpeg, needs_tesseract, needs_demo]
 

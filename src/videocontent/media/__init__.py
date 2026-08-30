@@ -1,6 +1,6 @@
 """Media layer — the only place FFmpeg is invoked.
 
-    from videocontext.media import probe, extract_audio, extract_plan, Workspace
+    from videocontent.media import probe, extract_audio, extract_plan, Workspace
 """
 
 from __future__ import annotations

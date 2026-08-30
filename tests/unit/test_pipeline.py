@@ -19,10 +19,10 @@ from pathlib import Path
 
 import pytest
 
-from videocontext import registry
-from videocontext.config import ProcessingConfig
-from videocontext.errors import DependencyMissingError, ProviderError
-from videocontext.interfaces import (
+from videocontent import registry
+from videocontent.config import ProcessingConfig
+from videocontent.errors import DependencyMissingError, ProviderError
+from videocontent.interfaces import (
     ASROutput,
     FrameImage,
     OCRObservation,
@@ -31,10 +31,10 @@ from videocontext.interfaces import (
     SceneSpan,
     VisionOutput,
 )
-from videocontext.processing import pipeline as pipe
-from videocontext.processing.asr import utterance
-from videocontext.processing.pipeline import Pipeline, build_provider
-from videocontext.schema.v1 import StageStatus, VideoInfo
+from videocontent.processing import pipeline as pipe
+from videocontent.processing.asr import utterance
+from videocontent.processing.pipeline import Pipeline, build_provider
+from videocontent.schema.v1 import StageStatus, VideoInfo
 
 # The fake sampler has to be registered *over* a built-in name: ``sampling.mode`` is a Literal,
 # so ``cfg.sampling.mode = "fake-sampler"`` is rejected by config validation before the registry

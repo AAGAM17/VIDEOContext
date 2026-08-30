@@ -13,12 +13,12 @@ from __future__ import annotations
 import ctranslate2
 import pytest
 
-from videocontext.config import ASRConfig
-from videocontext.errors import DependencyMissingError
-from videocontext.interfaces import FrameContext
-from videocontext.processing.asr import FALLBACK_ORDER, resolve_engine
-from videocontext.processing.asr import faster_whisper as fw
-from videocontext.processing.asr.null import NullASR
+from videocontent.config import ASRConfig
+from videocontent.errors import DependencyMissingError
+from videocontent.interfaces import FrameContext
+from videocontent.processing.asr import FALLBACK_ORDER, resolve_engine
+from videocontent.processing.asr import faster_whisper as fw
+from videocontent.processing.asr.null import NullASR
 
 
 def ctx(duration: float = 62.4, language: str | None = "en") -> FrameContext:

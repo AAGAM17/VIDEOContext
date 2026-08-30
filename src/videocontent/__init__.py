@@ -2,14 +2,14 @@
 
 Turn video into timestamped, searchable context for AI agents and applications::
 
-    from videocontext import Video
+    from videocontent import Video
 
     video = Video("demo.mp4")
     video.process()
     for hit in video.search("pricing"):
         print(hit.timecode, hit.text)
 
-Heavy submodules are imported lazily, so ``import videocontext`` stays fast and the base
+Heavy submodules are imported lazily, so ``import videocontent`` stays fast and the base
 install stays small (ARCHITECTURE §4).
 """
 

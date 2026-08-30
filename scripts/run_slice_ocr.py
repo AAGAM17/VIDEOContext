@@ -13,16 +13,16 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from videocontext.config import ProcessingConfig
-from videocontext.interfaces import FrameContext
-from videocontext.media.frames import extract_plan
-from videocontext.media.probe import probe
-from videocontext.media.workspace import Workspace
-from videocontext.processing.ocr import deduplicate
-from videocontext.processing.ocr.tesseract import TesseractOCR
-from videocontext.processing.sampling.adaptive import AdaptiveSampler
-from videocontext.processing.scenes.ffmpeg_scene import FFmpegSceneDetector
-from videocontext.processing.scenes.refine import refine_with_text
+from videocontent.config import ProcessingConfig
+from videocontent.interfaces import FrameContext
+from videocontent.media.frames import extract_plan
+from videocontent.media.probe import probe
+from videocontent.media.workspace import Workspace
+from videocontent.processing.ocr import deduplicate
+from videocontent.processing.ocr.tesseract import TesseractOCR
+from videocontent.processing.sampling.adaptive import AdaptiveSampler
+from videocontent.processing.scenes.ffmpeg_scene import FFmpegSceneDetector
+from videocontent.processing.scenes.refine import refine_with_text
 
 VIDEO = Path("tests/fixtures/demo.mp4")
 

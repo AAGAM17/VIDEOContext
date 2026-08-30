@@ -34,9 +34,9 @@ from itertools import pairwise
 import pytest
 
 from conftest import needs_demo, needs_ffmpeg
-from videocontext.config import ProcessingConfig
-from videocontext.processing.pipeline import Pipeline
-from videocontext.schema.v1 import StageStatus, VideoContextDocument
+from videocontent.config import ProcessingConfig
+from videocontent.processing.pipeline import Pipeline
+from videocontent.schema.v1 import StageStatus, VideoContextDocument
 
 pytestmark = [pytest.mark.integration, pytest.mark.slow, needs_ffmpeg, needs_demo]
 

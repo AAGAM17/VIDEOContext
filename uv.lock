@@ -3449,7 +3449,7 @@ wheels = [
 ]
 
 [[package]]
-name = "videocontext"
+name = "videocontent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
@@ -3525,7 +3525,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.12" },
     { name = "types-pyyaml", marker = "extra == 'dev'" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.30" },
-    { name = "videocontext", extras = ["asr", "ocr", "vision", "api"], marker = "extra == 'all'" },
+    { name = "videocontent", extras = ["asr", "ocr", "vision", "api"], marker = "extra == 'all'" },
 ]
 provides-extras = ["asr", "ocr", "vision", "vectors", "embeddings", "api", "mcp", "dev", "all"]
 

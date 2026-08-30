@@ -15,9 +15,9 @@ import time
 from pathlib import Path
 from typing import Any
 
-from videocontext import Video, load
-from videocontext.retrieval import search, at
-from videocontext.schema.v1 import VideoContextDocument
+from videocontent import Video, load
+from videocontent.retrieval import search, at
+from videocontent.schema.v1 import VideoContextDocument
 
 
 def run_retrieval_benchmark(vctx_path: str) -> dict[str, Any]:

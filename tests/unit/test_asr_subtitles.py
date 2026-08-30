@@ -11,9 +11,9 @@ from __future__ import annotations
 import pytest
 
 from conftest import needs_ffmpeg
-from videocontext.config import ASRConfig
-from videocontext.interfaces import FrameContext
-from videocontext.processing.asr.subtitles import (
+from videocontent.config import ASRConfig
+from videocontent.interfaces import FrameContext
+from videocontent.processing.asr.subtitles import (
     MAX_SUBTITLE_BYTES,
     SubtitleASR,
     parse_cues,
@@ -161,7 +161,7 @@ class TestReadSubtitleFile:
         path = tmp_path / "big.srt"
         path.write_text("x" * 64)
         monkeypatch.setattr(
-            "videocontext.processing.asr.subtitles.MAX_SUBTITLE_BYTES", 16
+            "videocontent.processing.asr.subtitles.MAX_SUBTITLE_BYTES", 16
         )
         with pytest.raises(ValueError, match="over the"):
             read_subtitle_file(path)

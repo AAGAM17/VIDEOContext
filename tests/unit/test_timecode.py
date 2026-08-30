@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from videocontext.timecode import format_span, format_timecode, parse_timecode
+from videocontent.timecode import format_span, format_timecode, parse_timecode
 
 
 class TestFormat:

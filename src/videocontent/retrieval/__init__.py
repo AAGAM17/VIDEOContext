@@ -1,6 +1,6 @@
 """Retrieval over a ``.vctx`` document — lexical now, hybrid by construction.
 
-    from videocontext.retrieval import search
+    from videocontent.retrieval import search
     for span in search(doc, "pricing"):
         print(span.timecode, span.modality, span.text)
 

@@ -11,10 +11,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from videocontext.config import ProcessingConfig, VisionConfig
-from videocontext.interfaces import FrameContext, FrameImage, VisionProvider
-from videocontext.processing.vision import NullVision
-from videocontext.registry import create
+from videocontent.config import ProcessingConfig, VisionConfig
+from videocontent.interfaces import FrameContext, FrameImage, VisionProvider
+from videocontent.processing.vision import NullVision
+from videocontent.registry import create
 
 
 def frames(count: int = 3) -> list[FrameImage]:

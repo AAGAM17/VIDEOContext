@@ -33,10 +33,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from videocontext.config import OCRConfig
-from videocontext.interfaces import FrameContext, FrameImage
-from videocontext.processing.ocr import deduplicate, normalize, similarity
-from videocontext.processing.ocr.tesseract import TesseractOCR
+from videocontent.config import OCRConfig
+from videocontent.interfaces import FrameContext, FrameImage
+from videocontent.processing.ocr import deduplicate, normalize, similarity
+from videocontent.processing.ocr.tesseract import TesseractOCR
 
 DEFAULT_FRAMES = Path(".vctx-work/demo/frames/pass")
 MANIFEST = Path("tests/fixtures/demo.manifest.json")

@@ -17,11 +17,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from videocontext import Video, load
-from videocontext.config import ProcessingConfig
-from videocontext.profiles import get_profile_builder, ProfileContext
-from videocontext.routing import classify_task, select_context, ContextBudget, pack_context
-from videocontext.schema.v1 import VideoContextDocument
+from videocontent import Video, load
+from videocontent.config import ProcessingConfig
+from videocontent.profiles import get_profile_builder, ProfileContext
+from videocontent.routing import classify_task, select_context, ContextBudget, pack_context
+from videocontent.schema.v1 import VideoContextDocument
 
 
 def estimate_raw_tokens(doc: VideoContextDocument) -> int:
@@ -83,7 +83,7 @@ def run_compression_benchmark(video_path: str, output_dir: Path) -> dict[str, An
         print(f"Query: {query}")
 
         # Classify
-        from videocontext.routing import TaskType
+        from videocontent.routing import TaskType
         classification = type('obj', (object,), {
             'task_type': getattr(__import__('videocontent.routing', fromlist=['TaskType']).TaskType, task_type.upper()),
             'confidence': 0.8,
@@ -126,7 +126,7 @@ def run_compression_benchmark(video_path: str, output_dir: Path) -> dict[str, An
 
     # Profile generation benchmark
     print("\n--- Profile Generation ---")
-    from videocontext.profiles import get_profile_builder, ProfileContext
+    from videocontent.profiles import get_profile_builder, ProfileContext
 
     profile_results = []
     profile_names = ["ui_design", "application", "product_demo", "tutorial"]

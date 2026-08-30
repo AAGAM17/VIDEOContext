@@ -19,12 +19,12 @@ import json
 import pytest
 
 from conftest import DEMO_MANIFEST, DEMO_VIDEO, needs_demo, needs_ffmpeg
-from videocontext.config import ASRConfig
-from videocontext.interfaces import FrameContext
-from videocontext.media.audio import extract_audio
-from videocontext.media.probe import probe
-from videocontext.processing.asr import resolve_engine
-from videocontext.processing.asr.faster_whisper import installed as whisper_installed
+from videocontent.config import ASRConfig
+from videocontent.interfaces import FrameContext
+from videocontent.media.audio import extract_audio
+from videocontent.media.probe import probe
+from videocontent.processing.asr import resolve_engine
+from videocontent.processing.asr.faster_whisper import installed as whisper_installed
 
 needs_whisper = pytest.mark.skipif(
     not whisper_installed(), reason="faster-whisper is not installed"

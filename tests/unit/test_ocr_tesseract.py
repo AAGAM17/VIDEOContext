@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import pytest
 
-from videocontext.config import OCRConfig
-from videocontext.errors import DependencyMissingError
-from videocontext.interfaces import FrameContext, FrameImage
-from videocontext.processing.ocr import tesseract as tess
+from videocontent.config import OCRConfig
+from videocontent.errors import DependencyMissingError
+from videocontent.interfaces import FrameContext, FrameImage
+from videocontent.processing.ocr import tesseract as tess
 
 CTX = FrameContext(duration=10.0, fps=30.0, width=1280, height=720)
 
