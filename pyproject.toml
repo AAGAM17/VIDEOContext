@@ -9,7 +9,7 @@ description = "The open-source semantic layer for video — turn video into time
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
-authors = [{ name = "VideoContext contributors" }]
+authors = [{ name = "Aagam Shah", email = "aagamshah17@gmail.com" }]
 keywords = ["video", "ocr", "asr", "whisper", "rag", "llm", "multimodal", "retrieval", "mcp"]
 classifiers = [
   "Development Status :: 3 - Alpha",
@@ -55,9 +55,9 @@ videocontent = "videocontent.cli:main"
 vctx = "videocontent.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/videocontext/videocontent"
-Documentation = "https://github.com/videocontext/videocontent/tree/main/docs"
-Issues = "https://github.com/videocontext/videocontent/issues"
+Homepage = "https://github.com/AAGAM17/VIDEOContext"
+Documentation = "https://github.com/AAGAM17/VIDEOContext/tree/main/docs"
+Issues = "https://github.com/AAGAM17/VIDEOContext/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/videocontent"]
