@@ -9,7 +9,7 @@ description = "The open-source semantic layer for video — turn video into time
 readme = "README.md"
 license = { text = "Apache-2.0" }
 requires-python = ">=3.10"
-authors = [{ name = "Aagam Shah", email = "aagamshah17@gmail.com" }]
+authors = [{ name = "Aagam Shah", email = "aagamshaha101@gmail.com" }]
 keywords = ["video", "ocr", "asr", "whisper", "rag", "llm", "multimodal", "retrieval", "mcp"]
 classifiers = [
   "Development Status :: 3 - Alpha",
