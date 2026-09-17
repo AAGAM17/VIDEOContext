@@ -159,8 +159,8 @@ def root(
 @app.command()
 @friendly
 def process(
-    video: Path = typer.Argument(
-        ..., help="Video file to process.", exists=True, dir_okay=False, readable=True,
+    video: str = typer.Argument(
+        ..., help="Video file path or http(s) URL to process.",
     ),
     output: Path | None = typer.Option(
         None, "--output", "-o", help="Where to write the .vctx. Default: alongside the video.",
@@ -169,6 +169,11 @@ def process(
     as_json: bool = typer.Option(False, "--json", help="Print a machine-readable summary."),
 ) -> None:
     """Process a video into a .vctx document.
+
+    Accepts a local file path or a direct http(s) media URL. Remote URLs are fetched
+    through the source security boundary (SSRF protection, redirect revalidation,
+    size/timeout limits) into a temp file, then processed by the same pipeline —
+    use `source inspect` first to check access without downloading.
 
     Local by default: FFmpeg for decoding, Tesseract for on-screen text, faster-whisper for
     speech. Nothing is uploaded unless a remote provider is explicitly configured, and
@@ -443,6 +448,87 @@ def ask(
         console.print(render.bold("\nEvidence:"))
         for i, span in enumerate(answer.evidence, 1):
             console.print(f"  [{i}] {span.timecode} ({span.modality}): {span.text[:120]}")
+
+
+# -- source ----------------------------------------------------------------
+
+
+source_app = typer.Typer(
+    name="source",
+    help="Inspect and resolve video sources (local files, URLs).",
+    no_args_is_help=True,
+)
+app.add_typer(source_app, name="source")
+
+
+@source_app.command("inspect")
+@friendly
+def source_inspect(
+    source: str = typer.Argument(..., help="File path or http(s) URL to describe."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the inspection as JSON."),
+) -> None:
+    """Describe a video source without downloading or processing it.
+
+    Answers: what is this, where does it come from, can VIDEOContext access it, what
+    media is available, does it need auth, what processing is possible.
+    """
+    from ..sources.resolve import inspect_source, resolve
+
+    src = resolve(source, config=state.config)
+    info = inspect_source(src, config=state.config)
+    if as_json:
+        _emit({
+            "source_id": src.source_id,
+            "source_type": src.source_type.value,
+            "provider": src.provider,
+            "canonical_id": src.canonical_id,
+            "accessible": info.accessible,
+            "reason": info.reason,
+            "media": info.media,
+            "capabilities": info.capabilities.model_dump(mode="json"),
+            "requires_authentication": info.requires_authentication,
+            "estimated_size_bytes": info.estimated_size_bytes,
+            "warnings": info.warnings,
+        })
+        if not info.accessible:
+            raise typer.Exit(1)
+        return
+    console.print(render.bold(f"{src.source_type.value} ") + Text(f"({src.provider})"))
+    console.print(f"  source_id:    {src.source_id}")
+    console.print(f"  canonical_id: {src.canonical_id}")
+    console.print(f"  accessible:   {'yes' if info.accessible else 'no'}")
+    if info.reason:
+        console.print(f"  reason:       {info.reason}")
+    if info.media:
+        console.print(render.bold("  media:"))
+        for key, value in info.media.items():
+            console.print(f"    {key}: {value}")
+    if info.estimated_size_bytes:
+        console.print(f"  estimated size: {info.estimated_size_bytes / 1e6:.1f} MB")
+    if info.warnings:
+        for warning in info.warnings:
+            errors.print(f"  warning: {warning}")
+    if not info.accessible:
+        raise typer.Exit(1)
+
+
+@source_app.command("resolve")
+@friendly
+def source_resolve(
+    source: str = typer.Argument(..., help="File path or http(s) URL to resolve."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the resolution as JSON."),
+) -> None:
+    """Show the canonical identity VIDEOContext assigns to a source (dedup key)."""
+    from ..sources.resolve import resolve
+
+    src = resolve(source, config=state.config)
+    if as_json:
+        _emit(src.model_dump(mode="json"))
+        return
+    console.print(f"source_id:    {src.source_id}")
+    console.print(f"source_type:  {src.source_type.value}")
+    console.print(f"provider:     {src.provider}")
+    console.print(f"canonical_id: {src.canonical_id}")
 
 
 # -- doctor ----------------------------------------------------------------

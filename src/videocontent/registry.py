@@ -44,6 +44,7 @@ CAPABILITIES = (
     "vector_store",
     "llm",
     "storage",
+    "source",
 )
 
 #: Built-ins, declared lazily so heavy adapters stay unimported until used.
@@ -88,6 +89,10 @@ _BUILTINS: dict[Capability, dict[str, str]] = {
         "null": "videocontent.llm.null:NullLLM",
     },
     "storage": {},
+    "source": {
+        "local": "videocontent.sources.local:LocalFileAdapter",
+        "http": "videocontent.sources.http:DirectURLAdapter",
+    },
 }
 
 _BUILTIN_ALIASES: dict[Capability, dict[str, str]] = {
@@ -142,6 +147,7 @@ register_embedding = _decorator("embedding")
 register_vector_store = _decorator("vector_store")
 register_llm = _decorator("llm")
 register_storage = _decorator("storage")
+register_source = _decorator("source")
 
 
 def _load_entrypoints() -> None:
@@ -268,6 +274,7 @@ __all__ = [
     "register_ocr",
     "register_sampler",
     "register_scene_detector",
+    "register_source",
     "register_storage",
     "register_vector_store",
     "register_vision",

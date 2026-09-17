@@ -81,6 +81,33 @@ Contributors working on video processing functionality should consider security 
 
 Avoid assuming that uploaded files are safe or well-formed.
 
+## Remote Source Ingestion
+
+`videocontent.sources` fetches `http(s)` URLs. Remote media is untrusted input and
+passes a dedicated security boundary (shared by the SDK, CLI, API, and MCP — never
+duplicated per surface):
+
+* **Scheme allowlist:** only `http`/`https`. URLs with embedded `user:pass@` credentials
+  are refused rather than fetched.
+* **SSRF / DNS rebinding:** every resolved IP for the host (and for each redirect hop)
+  is checked; loopback, private, link-local, multicast, reserved, and unspecified
+  addresses are blocked unless `sources.allow_private_ips` is explicitly enabled
+  (intended for trusted tests only).
+* **Redirects:** followed manually up to `sources.max_redirects`, revalidating scheme,
+  DNS, and IP safety on every hop. Redirects to non-http(s) schemes are refused.
+* **Response validation:** `Content-Type` is inspected (web pages such as `text/html`
+  are refused, not downloaded); `Content-Length` is pre-checked and the streamed body
+  is capped at `sources.max_download_mb` with `sources.download_timeout_s` applied.
+* **Provenance hygiene:** canonical source identity strips credentials and ephemeral
+  query params (tokens, signatures, expiry); `.vctx` stores only redacted locators.
+  Credentials never appear in logs, cache keys, or exported context.
+* **Lifecycle:** downloads land in a confined temp root, are removed on success and
+  failure (unless `sources.keep_downloads` is set for debugging), stale dirs are swept
+  by TTL, and a free-space pre-check fails fast before large fetches.
+
+When reporting a remote-ingestion issue, include the (redacted) URL shape, redirect
+chain, headers, and which control failed — never live credentials or signed URLs.
+
 ## Dependencies
 
 VIDEOContext may depend on third-party libraries and external tools for media processing, AI functionality, or other features.

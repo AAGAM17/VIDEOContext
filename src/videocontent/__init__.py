@@ -32,6 +32,8 @@ if TYPE_CHECKING:  # pragma: no cover
 _LAZY: dict[str, tuple[str, str]] = {
     "Video": (".sdk", "Video"),
     "process": (".sdk", "process"),
+    "open": (".sdk", "open"),
+    "inspect_source": (".sdk", "inspect_source"),
     "load": (".sdk", "load"),
     "EvidenceSpan": (".retrieval.query", "EvidenceSpan"),
     "SearchResult": (".retrieval.query", "SearchResult"),
@@ -67,5 +69,7 @@ __all__ = [
     "__version__",
     "configure_logging",
     "get_logger",
+    "inspect_source",
     "load_config",
+    "open",
 ]

@@ -264,6 +264,31 @@ class StorageProvider(Protocol):
     def exists(self, key: str) -> bool: ...
 
 
+@runtime_checkable
+class SourceAdapter(Protocol):
+    """Acquires media for one family of video sources.
+
+    The adapter owns *acquisition* (resolving, inspecting, materializing to a local
+    file). It never runs extraction (OCR/ASR/vision) — a materialized asset flows
+    into the existing processing pipeline unchanged (ARCHITECTURE source ≠ processing).
+    """
+
+    name: str
+
+    def can_handle(self, locator: str) -> bool:
+        """Cheap string-level check: could this adapter own ``locator``?"""
+        ...
+
+    def inspect(self, source: Any, ctx: Any = None) -> Any:
+        """Describe the source without downloading the whole object."""
+
+    def materialize(self, source: Any, dest_dir: Path, ctx: Any = None) -> Any:
+        """Make the media available as a local file; return a ``VideoAsset``."""
+
+    def cleanup(self, asset: Any) -> None:
+        """Release temporary resources held by a materialized asset."""
+
+
 __all__ = [
     "ASREngine",
     "ASROutput",
@@ -280,6 +305,7 @@ __all__ = [
     "SampleWindow",
     "SceneDetector",
     "SceneSpan",
+    "SourceAdapter",
     "StorageProvider",
     "VectorStore",
     "VisionOutput",

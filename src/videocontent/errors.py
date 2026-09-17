@@ -80,18 +80,67 @@ class SecurityError(VideoContextError):
     """A request would escape a sandboxed path or violate an input limit."""
 
 
+class SourceError(VideoContextError):
+    """Base for video-source resolution and ingestion failures."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "SOURCE_ERROR",
+        retryable: bool = False,
+        hint: str | None = None,
+    ) -> None:
+        super().__init__(message, hint=hint)
+        self.code = code
+        self.retryable = retryable
+
+
+class UnsupportedSourceError(SourceError):
+    """The source type or provider is not supported by this installation."""
+
+    def __init__(self, message: str, *, hint: str | None = None) -> None:
+        super().__init__(message, code="UNSUPPORTED_SOURCE", retryable=False, hint=hint)
+
+
+class SourceNotFoundError(SourceError):
+    """The referenced media could not be found or accessed."""
+
+    def __init__(self, message: str, *, hint: str | None = None) -> None:
+        super().__init__(message, code="SOURCE_NOT_FOUND", retryable=False, hint=hint)
+
+
+class SourceAccessError(SourceError):
+    """Access was denied, is private, or requires authentication."""
+
+    def __init__(self, message: str, *, hint: str | None = None) -> None:
+        super().__init__(message, code="ACCESS_DENIED", retryable=False, hint=hint)
+
+
+class DownloadError(SourceError):
+    """A remote fetch failed (timeout, size limit, bad response)."""
+
+    def __init__(self, message: str, *, retryable: bool = True, hint: str | None = None) -> None:
+        super().__init__(message, code="DOWNLOAD_ERROR", retryable=retryable, hint=hint)
+
+
 __all__ = [
     "ConfigurationError",
     "CorruptMediaError",
     "DependencyMissingError",
+    "DownloadError",
     "FFmpegError",
     "MediaError",
     "MediaTooLargeError",
     "ProviderError",
     "SchemaError",
     "SecurityError",
+    "SourceAccessError",
+    "SourceError",
+    "SourceNotFoundError",
     "StageError",
     "UnsupportedMediaError",
+    "UnsupportedSourceError",
     "UnsupportedVersionError",
     "VideoContextError",
 ]

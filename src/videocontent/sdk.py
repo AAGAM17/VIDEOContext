@@ -108,25 +108,62 @@ class NotProcessedError(VideoContextError):
 class Video:
     """A video and whatever is known about it.
 
-    Constructed from a media file, the ``Video`` has no document until :meth:`process` runs.
+    Constructed from a media file, a URL, a :class:`VideoSource` or a
+    :class:`VideoAsset`, the ``Video`` has no document until :meth:`process` runs.
     Constructed by :func:`load`, it has a document and no media — which is the normal case for
     querying, and the reason nothing here requires the original file to still exist.
+
+    ``Video("demo.mp4")`` keeps working exactly as before; ``Video("https://…/v.mp4")``
+    and ``videocontent.open(source)`` are the universal entry points for any source.
     """
 
     def __init__(
         self,
-        source: str | Path,
+        source: str | Path | Any,
         *,
         config: ProcessingConfig | None = None,
     ) -> None:
-        self.source: Path = Path(source)
+        from .sources.resolve import resolve as _resolve
+        from .sources.types import VideoAsset as _Asset
+        from .sources.types import VideoSource as _Source
+
         self.config: ProcessingConfig = config or ProcessingConfig()
         self._doc: VideoContextDocument | None = None
         self._retriever: Retriever | None = None
         self.path: Path | None = None
         """Where the document was loaded from or last saved to, if anywhere."""
+        if isinstance(source, _Asset):
+            self._asset: Any = source
+            self.source_ref: Any = source.source
+            self.locator: str = source.source.locator
+        elif isinstance(source, _Source):
+            self._asset = None
+            self.source_ref = source
+            self.locator = source.locator
+        else:
+            self._asset = None
+            self.source_ref = _resolve(str(source), config=self.config)
+            self.locator = str(source)
+        # Backward-compatible display path: local files keep their path; URLs collapse
+        # to their basename so ``.name`` / ``default_path()`` keep working.
+        if self.source_ref.source_type.value == "local_file":
+            self.source: Path = Path(self.locator)
+        else:
+            base = self.locator.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] or "remote-video"
+            self.source = Path(base)
 
     # -- construction ------------------------------------------------------
+
+    @classmethod
+    def open(cls, source: str | Path | Any, *, config: ProcessingConfig | None = None) -> Video:
+        """Universal entry point: local path, URL, ``VideoSource`` or ``VideoAsset``."""
+        return cls(source, config=config)
+
+    def inspect(self) -> Any:
+        """Describe this video's source without downloading or processing it."""
+        from .sources.resolve import inspect_source as _inspect
+
+        return _inspect(self.source_ref, config=self.config)
 
     @classmethod
     def from_document(
@@ -140,6 +177,23 @@ class Video:
         video = cls(doc.video.filename, config=config)
         video._doc = doc
         video.path = Path(path) if path is not None else None
+        # Restore source provenance when the document carries it (new documents do).
+        try:
+            if getattr(doc, "source", None) is not None:
+                from .sources.types import SourceType as _ST
+                from .sources.types import VideoSource as _VS
+
+                rec = doc.source
+                video.source_ref = _VS(
+                    source_id=rec.source_id,
+                    source_type=_ST(rec.source_type),
+                    provider=rec.provider,
+                    locator=rec.locator_redacted or doc.video.filename,
+                    canonical_id=rec.canonical_id or rec.source_id,
+                    metadata={},
+                )
+        except Exception as exc:
+            log.debug("sdk.source_restore_skipped", extra={"error": str(exc)})
         return video
 
     # -- state -------------------------------------------------------------
@@ -180,7 +234,7 @@ class Video:
 
         from .processing.pipeline import Pipeline
 
-        self._doc = Pipeline(self.config).run(self.source)
+        self._doc = Pipeline(self.config).run(self._asset or self.source_ref)
         self._retriever = None
         return self._doc
 
@@ -467,8 +521,24 @@ def load(path: str | Path, *, config: ProcessingConfig | None = None) -> Video:
     return Video.from_document(io.load(path), config=config, path=path)
 
 
+def open(source: str | Path | Any, *, config: ProcessingConfig | None = None) -> Video:
+    """Universal entry point: local path, URL, ``VideoSource`` or ``VideoAsset``.
+
+    Returns an unprocessed :class:`Video` — call :meth:`Video.inspect` to describe the
+    source without fetching it, or :meth:`Video.process` to materialize and extract.
+    """
+    return Video.open(source, config=config)
+
+
+def inspect_source(source: str | Path | Any, *, config: ProcessingConfig | None = None) -> Any:
+    """Describe a source without downloading or processing it."""
+    from .sources.resolve import inspect_source as _inspect
+
+    return _inspect(source, config=config or ProcessingConfig())
+
+
 def process(
-    source: str | Path,
+    source: str | Path | Any,
     *,
     config: ProcessingConfig | None = None,
     output: str | Path | bool | None = None,
@@ -489,4 +559,4 @@ def process(
     return video
 
 
-__all__ = ["VCTX_SUFFIX", "NotProcessedError", "Video", "load", "process", "Answer", "OptimizedContext"]
+__all__ = ["VCTX_SUFFIX", "NotProcessedError", "Video", "inspect_source", "load", "open", "process", "Answer", "OptimizedContext"]

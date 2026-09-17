@@ -144,6 +144,8 @@ class Run:
     doc: VideoContextDocument | None = None
     records: list[StageRecord] = field(default_factory=list)
     stage_times: dict[str, float] = field(default_factory=dict)
+    source_ref: Any = None
+    asset: Any = None
 
     def ran(self, name: str) -> bool:
         return any(r.name == name and r.ran for r in self.records)
@@ -263,23 +265,54 @@ class Pipeline:
             Stage("segments", self._segments, sections=("segments",)),
         ]
 
-    def run(self, source: str | Path) -> VideoContextDocument:
-        """Process ``source`` and return the document. Artifacts land in the workspace."""
+    def run(self, source: str | Path | Any) -> VideoContextDocument:
+        """Process ``source`` and return the document. Artifacts land in the workspace.
+
+        ``source`` may be a local path (existing behaviour, zero overhead), an
+        ``http(s)`` URL string, a :class:`VideoSource`, or a materialized
+        :class:`VideoAsset`. Remote sources are downloaded through the source layer's
+        security boundary, processed identically, then cleaned up — the stage sequence
+        never knows where the bytes came from (source ≠ processing).
+        """
+        from ..sources.lifecycle import materialized as _materialized
+        from ..sources.resolve import resolve as _resolve
+        from ..sources.types import VideoAsset as _Asset
+        from ..sources.types import VideoSource as _Source
+
+        if isinstance(source, _Asset):
+            return self._run_local(Path(source.local_path), source.source, source)
+        vsrc = source if isinstance(source, _Source) else _resolve(str(source), config=self.config)
+        if vsrc.source_type.value == "local_file":
+            from ..sources.adapters import LocalFileAdapter
+
+            asset = LocalFileAdapter().materialize(vsrc, Path.cwd())
+            return self._run_local(Path(asset.local_path), vsrc, asset)
+        with _materialized(vsrc, config=self.config) as asset:
+            return self._run_local(Path(asset.local_path), vsrc, asset)
+
+    def _run_local(self, local_path: Path | str, vsrc: Any, asset: Any) -> VideoContextDocument:
+        """Existing run body, operating on an already-materialized local file."""
         started = time.monotonic()
         cfg = self.config
 
         # Outside the degradable loop on purpose: §7 says a container we cannot decode fails
         # fast with no partial document. Size, duration and container limits are enforced here
         # too, before a single frame is decoded (§31).
-        video = probe(source, limits=cfg.limits, compute_hash=True)
+        video = probe(local_path, limits=cfg.limits, compute_hash=True)
 
-        workspace = Workspace.for_video(source, workdir=cfg.workdir, key=cfg.full_hash())
+        # Remote downloads have no meaningful "alongside the video" directory (the temp dir
+        # is deleted after the run, taking any cache with it). Persist their workspace and
+        # stage cache under the project workdir instead; local files keep the old default.
+        workdir = cfg.workdir
+        if workdir is None and getattr(asset, "temporary", False):
+            workdir = Path.cwd() / ".videocontent"
+        workspace = Workspace.for_video(local_path, workdir=workdir, key=cfg.full_hash())
 
         # Initialize stage cache if enabled
         cache = StageCache(workspace.cache_dir) if cfg.cache_enabled else None
 
         run = Run(
-            source=Path(str(source)),
+            source=Path(str(local_path)),
             config=cfg,
             video=video,
             workspace=workspace,
@@ -290,6 +323,8 @@ class Pipeline:
                 height=video.height,
                 language=cfg.asr.language,
             ),
+            source_ref=vsrc,
+            asset=asset,
         )
         log.info(
             "pipeline.start",
@@ -314,6 +349,7 @@ class Pipeline:
 
         run.doc.stages = run.records
         run.doc.metrics = self._metrics(run, time.monotonic() - started)
+        self._attach_source(run)
         log.info(
             "pipeline.done",
             extra={
@@ -678,6 +714,45 @@ class Pipeline:
             frames=frames,
         )
 
+    def _attach_source(self, run: Run) -> None:
+        """Stamp the document with source provenance (never credentials)."""
+        from ..schema.v1 import SourceRecord
+        from ..sources import security as _sec
+
+        vsrc = run.source_ref
+        asset = run.asset
+        if vsrc is None or run.doc is None:
+            return
+        temporary = bool(getattr(asset, "temporary", False))
+        # The temp download path is an implementation detail — never persist it.
+        if temporary:
+            run.doc.video.path = None
+            # Give remote documents a human-meaningful filename from the URL.
+            locator = getattr(vsrc, "locator", "") or ""
+            base = locator.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1] or "remote-video"
+            if "." not in base:
+                base += ".mp4"
+            run.doc.video.filename = base
+        if getattr(asset, "content_hash", None) and not run.doc.video.content_hash:
+            run.doc.video.content_hash = asset.content_hash
+        try:
+            redacted = _sec.redact(getattr(vsrc, "locator", ""))
+        except Exception:
+            redacted = None
+        run.doc.source = SourceRecord(
+            source_id=getattr(vsrc, "source_id", ""),
+            source_type=getattr(getattr(vsrc, "source_type", None), "value",
+                                str(getattr(vsrc, "source_type", "local_file"))),
+            provider=getattr(vsrc, "provider", "local"),
+            locator_redacted=redacted,
+            canonical_id=getattr(vsrc, "canonical_id", None),
+            retrieved_at=_now(),
+            access_mode="remote" if temporary else "local",
+            content_hash=getattr(asset, "content_hash", None) or run.doc.video.content_hash,
+            etag=getattr(asset, "etag", None),
+            last_modified=getattr(asset, "last_modified", None),
+        )
+
     def _apply_cached_result(self, stage_name: str, cached_data: Any, run: Run) -> None:
         """Apply cached stage data to the run object."""
         if stage_name == "scenes":
@@ -764,7 +839,10 @@ class Pipeline:
         )
 
 
-def process(source: str | Path, config: ProcessingConfig | None = None) -> VideoContextDocument:
+def process(
+    source: str | Path | Any,
+    config: ProcessingConfig | None = None,
+) -> VideoContextDocument:
     """One-shot convenience wrapper: ``Pipeline(config).run(source)``."""
     return Pipeline(config).run(source)
 

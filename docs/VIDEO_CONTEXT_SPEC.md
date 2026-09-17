@@ -75,6 +75,30 @@ same code.
 `vctx_version` is the **only** field whose absence is fatal. Every modality array defaults
 to `[]`, so a minimal valid document is version + `video` + empty arrays.
 
+### `source` — provenance (optional, additive)
+
+Documents produced through the source layer carry an optional `source` record:
+
+```json
+{
+  "source_id": "src_9f2c1a0b1c2d",
+  "source_type": "direct_url",
+  "provider": "http",
+  "locator_redacted": "https://example.com/talk.mp4",
+  "canonical_id": "url:https://example.com/talk.mp4",
+  "retrieved_at": "2026-09-17T05:00:00Z",
+  "access_mode": "remote",
+  "content_hash": "sha256:…",
+  "etag": null,
+  "last_modified": null
+}
+```
+
+Rules: `source` may be absent (documents predating the source layer load with
+`source=None`); it never contains credentials (locators are redacted, canonical ids
+strip tokens/signatures); readers must ignore it if unrecognized per the
+unknown-fields rule.
+
 ### Versioning
 
 `MAJOR.MINOR`. Minor bumps are additive and backwards compatible — a v1.0 reader must

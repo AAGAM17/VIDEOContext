@@ -84,6 +84,29 @@ different machine than querying.
 Pydantic v2 models for the `.vctx` document plus (de)serialization and migration.
 Depends on nothing else in the project. See [VIDEO_CONTEXT_SPEC.md](VIDEO_CONTEXT_SPEC.md).
 
+### Layer 0.5 — `videocontent.sources` (the source boundary)
+
+The **only** place that turns a user-supplied reference into bytes the pipeline may
+decode. Flow: `resolve()` → `SourceAdapter` → `VideoAsset.local_path` → `Pipeline`.
+
+- `VideoSource` (unresolved reference: type, provider, locator, canonical id,
+  capabilities) and `VideoAsset` (normalized media: local file + provenance).
+  The pipeline only ever sees `local_path` — source ≠ processing.
+- Adapters today: `local` (zero-copy passthrough) and `http` (validated download).
+  Registered under the `source` capability, so a future S3/YouTube/catalog adapter
+  plugs in without touching the engine. Other `SourceType` members reserve the
+  taxonomy; resolving one raises `UnsupportedSourceError`.
+- Security: scheme allowlist (http/https), DNS resolution with every returned IP
+  checked (loopback/private/link-local/multicast/reserved rejected by default),
+  per-redirect revalidation, response content-type and size/timeout enforcement,
+  canonical identity with credentials and ephemeral query params stripped.
+- Lifecycle: temp downloads under a confined root, cleanup on success and failure,
+  TTL sweeps, free-space pre-check. Local files have zero overhead and no behaviour
+  change.
+- Provenance: each document carries an optional `source` record (redacted locator,
+  canonical id, access mode, content hash/ETag) — additive, old documents load
+  with `source=None`.
+
 ### Layer 1 — `videocontent.media` (the media boundary)
 
 The **only** place that shells out to FFmpeg/FFprobe.
@@ -281,6 +304,7 @@ applies.
 ```
 src/videocontent/
 ├── schema/         .vctx models, io, migrations
+├── sources/        source boundary: resolve · adapters · security · lifecycle
 ├── media/          ffmpeg boundary: probe, frames, audio
 ├── processing/     sampling · scenes · ocr · asr · vision · events · pipeline
 ├── retrieval/      index · lexical · fusion · query

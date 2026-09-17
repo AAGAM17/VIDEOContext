@@ -220,6 +220,33 @@ class LimitsConfig(_Cfg):
     )
 
 
+class SourceConfig(_Cfg):
+    """Remote-source ingestion policy.
+
+    Local files bypass this section entirely (no overhead, no behaviour change).
+    Every remote fetch — inspection and download — is validated against it.
+    """
+
+    enabled_sources: list[str] = Field(
+        default_factory=lambda: ["local", "http"],
+        description="Adapter names the resolver may use.",
+    )
+    allow_private_ips: bool = Field(
+        default=False,
+        description="Allow loopback/private/link-local targets. Keep false unless testing.",
+    )
+    max_redirects: int = Field(default=5, ge=0, le=20)
+    download_timeout_s: float = Field(default=300.0, gt=0)
+    max_download_mb: int = Field(default=2048, gt=0)
+    temp_ttl_h: float = Field(
+        default=24.0, gt=0, description="Stale temp-media sweep threshold."
+    )
+    user_agent: str = Field(default="VideoContext/0.1 (+https://github.com/AAGAM17/VIDEOContext)")
+    keep_downloads: bool = Field(
+        default=False, description="Keep downloaded media after processing (debugging)."
+    )
+
+
 class ProcessingConfig(_Cfg):
     """The complete knob surface. All fields have working defaults."""
 
@@ -233,6 +260,7 @@ class ProcessingConfig(_Cfg):
     retrieval: RetrievalConfig = Field(default_factory=RetrievalConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     limits: LimitsConfig = Field(default_factory=LimitsConfig)
+    sources: SourceConfig = Field(default_factory=SourceConfig)
 
     workdir: Path | None = Field(
         default=None, description="Artifact dir; default: alongside the video."
@@ -286,6 +314,9 @@ ENV_MAP: dict[str, str] = {
     "CACHE_ENABLED": "cache_enabled",
     "MAX_FILE_SIZE_MB": "limits.max_file_size_mb",
     "MAX_DURATION_S": "limits.max_duration_s",
+    "SOURCE_ALLOW_PRIVATE_IPS": "sources.allow_private_ips",
+    "SOURCE_MAX_DOWNLOAD_MB": "sources.max_download_mb",
+    "SOURCE_TIMEOUT_S": "sources.download_timeout_s",
 }
 
 _TRUTHY = {"1", "true", "yes", "on"}
@@ -401,14 +432,15 @@ __all__ = [
     "ENV_PREFIX",
     "ASRConfig",
     "EmbeddingConfig",
-    "LimitsConfig",
     "LLMConfig",
+    "LimitsConfig",
     "OCRConfig",
     "ProcessingConfig",
     "RetrievalConfig",
     "SamplingConfig",
     "SceneConfig",
     "SegmentConfig",
+    "SourceConfig",
     "VisionConfig",
     "find_config_file",
     "from_env",

@@ -377,6 +377,45 @@ video = videocontent.process(
 )
 ```
 
+## Process from any supported source
+
+`Video` / `videocontent.open` accept a local path, a `file://` URL, a direct
+`http(s)` media URL, or a `VideoSource` / `VideoAsset`:
+
+```python
+import videocontent
+
+video = videocontent.open("https://example.com/talk.mp4")
+video.process()
+video.save("talk.vctx")
+```
+
+```bash
+videocontent process https://example.com/talk.mp4 -o talk.vctx
+```
+
+Supported today:
+
+| Source | Status |
+|--------|--------|
+| Local file | ✅ supported |
+| Direct `http(s)` media URL | ✅ supported |
+| YouTube / Vimeo / platforms, S3/GCS/Azure, catalogs, live streams | ⬜ planned (adapter extension point, not implemented) |
+
+Remote URLs are fetched through a security boundary (SSRF/DNS/redirect validation,
+size and timeout limits) into a temp file, then processed by the same pipeline —
+the stages never know where the bytes came from. Check access without downloading:
+
+```bash
+videocontent source inspect https://example.com/talk.mp4
+videocontent source resolve https://example.com/talk.mp4 --json
+```
+
+```python
+info = videocontent.inspect_source("https://example.com/talk.mp4")
+print(info.accessible, info.media)
+```
+
 ---
 
 # Search a Video
@@ -1457,7 +1496,8 @@ The current repository includes:
 
 * Core Python package
 * Video processing pipeline
-* `.vctx` temporal context format
+* Universal source layer (local files + direct URLs, inspect/resolve, SSRF-safe ingestion)
+* `.vctx` temporal context format (with source provenance)
 * Speech processing infrastructure
 * OCR infrastructure
 * Vision infrastructure

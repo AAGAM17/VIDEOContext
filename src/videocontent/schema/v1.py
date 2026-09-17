@@ -509,6 +509,26 @@ class Producer(VctxModel):
     config_hash: str | None = None
 
 
+class SourceRecord(VctxModel):
+    """Provenance for *where the media came from* — the source layer's receipt.
+
+    Additive (v1.0 readers ignore it via ``extra="allow"``; old documents load with
+    ``source=None``). Never contains credentials: locators are stored redacted and
+    the canonical id strips tokens/signatures (sources/security.canonicalize_url).
+    """
+
+    source_id: str
+    source_type: str = "local_file"
+    provider: str = "local"
+    locator_redacted: str | None = None
+    canonical_id: str | None = None
+    retrieved_at: datetime | None = None
+    access_mode: str = "local"
+    content_hash: str | None = None
+    etag: str | None = None
+    last_modified: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # §3 document
 # ---------------------------------------------------------------------------
@@ -524,6 +544,9 @@ class VideoContextDocument(VctxModel):
 
     video: VideoInfo
     stages: list[StageRecord] = Field(default_factory=list)
+
+    # Source provenance (additive: None for documents produced before the source layer).
+    source: SourceRecord | None = None
 
     scenes: list[Scene] = Field(default_factory=list)
     transcript: list[Utterance] = Field(default_factory=list)
@@ -630,6 +653,7 @@ __all__ = [
     "Producer",
     "Scene",
     "Segment",
+    "SourceRecord",
     "StageRecord",
     "StageStatus",
     "SubtitleTrack",

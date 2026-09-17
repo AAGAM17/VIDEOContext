@@ -176,6 +176,21 @@ Potential areas include:
 
 Please try to keep integrations modular and avoid unnecessarily coupling the core architecture to a single provider.
 
+### Add a Source Adapter
+
+New video origins (object storage, platforms, catalogs) plug in behind the
+`source` capability without touching the processing engine:
+
+1. Implement the `SourceAdapter` protocol (`can_handle` / `inspect` / `materialize` /
+   `cleanup`) in `src/videocontent/sources/` — pure acquisition, never extraction.
+2. Register it (`@register_source("my-provider")`) with lazy imports so optional
+   dependencies stay optional.
+3. Resolve through `videocontent.sources.resolve` so the SSRF/redirect/limits boundary
+   applies; never fetch URLs with a separate code path.
+4. Add tests: resolution, canonical identity, inspection, and adversarial cases
+   (private IP, redirect-to-private, oversized, wrong content-type).
+5. Document the source as supported only when it actually works end to end.
+
 # Development Setup
 
 Start by cloning your fork of the repository.
