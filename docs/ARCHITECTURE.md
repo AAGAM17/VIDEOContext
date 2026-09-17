@@ -188,17 +188,47 @@ Pure functions over the finished document — they relate facts, never extract n
 
 - `videocontent.temporal`: interval relations (`relate`), clamped windows, cheap
   change detection (scene/OCR/speech turnover), extractive chapters (titles always
-  `inferred=True`), UI states from stable on-screen text.
+  `inferred=True`), UI states from stable on-screen text (observed text +
+  layout signatures, inferred app hints), event chains and change chains labeled
+  `TEMPORAL_SEQUENCE` (adjacency, never causation), UI timelines.
 - `videocontent.entities`: timestamp-grounded entities (ERROR/COMMAND from event
   evidence, CONCEPT terms linked across modalities on co-occurrence) with explicit
-  confidence and `ambiguous` flags. Single mentions are sightings, not entities.
+  confidence and `ambiguous` flags, alias maps and opt-in lexical similarity,
+  `EntityTimeline` (first/last/between/before/after, surrounding context, related
+  events/entities). Single mentions are sightings, not entities.
+- `videocontent.graph`: `EvidenceGraph` derived view — fact nodes (observed) plus
+  entity/occurrence/change/chapter/state nodes (derived), edges with exactly one
+  documented construction rule each (`OBSERVED_IN`, `DERIVED_FROM`, `SAME_CONCEPT`,
+  `SUPPORTS`, `APPEARS_IN`, `CHANGES_INTO`, temporal chain…). Bounded traversal
+  (`max_depth`/`max_nodes`/`max_seconds`), `explain()` returns rules, not vibes.
+- `videocontent.queryplan`: `QueryPlan` (intent taxonomy, resolved entities,
+  temporal constraints with configurable gap thresholds, modalities, retrieval
+  strategy, graph operations, budget, fallback, coverage) — inspectable via
+  SDK/CLI/API/MCP.
 - `videocontent.collection`: multi-video search with per-video provenance
-  (`video_id` on every span) and evidence-based comparison. Collections never merge files.
+  (`video_id` on every span), cross-video entity links (local evidence kept),
+  occurrences/videos-with queries, collection context packages, and
+  added/removed/changed/unchanged/uncertain comparison. Collections never merge
+  files; timestamps stay video-local.
 - `videocontent.plans`: task → required stages with reasons, plus coverage checks
   against a document. Plans are inspectable data; they never trigger processing.
+- `videocontent.packages`: first-class `ContextPackage` (planned query, budgeted
+  evidence, entities/events/changes, temporal relations, frames, graph summary,
+  provenance, warnings, omitted-information ledger) with JSON/text/Markdown
+  renderings, anchor-preserving optimization, and opt-in non-destructive redaction.
 - `videocontent.routing` (context packages): query → retrieval → temporal expansion →
   dedup → structural budgets (`max_spans`/`max_seconds`/`max_frames`) → token trim →
   package. Every cut is recorded in `budget_notes`.
+
+## Stored facts vs derived views vs query-time intelligence
+
+- **Stored** (`.vctx`): transcript, OCR, vision, objects, events, scenes, segments,
+  frames, stages, metrics, source. Covered by the format spec and migrations.
+- **Derived** (computed, never stored): graph, entities, chapters, changes, states,
+  chains, timelines, receipts, comparisons. Deterministic for a given document.
+- **Query-time** (per question): query plans, retrieval + expansion + rerank,
+  context packages, answers + traces. Bounded by budgets; inspectable via
+  `--explain` and the trace payloads.
 
 ### Layer 5 — `videocontent.sdk` (the facade)
 
@@ -207,9 +237,9 @@ video = Video("lecture.mp4")   # lazy: nothing runs yet
 video.process()                # → VideoContextDocument (.vctx)
 video.search("pricing")        # → list[EvidenceSpan]
 video.ask("what was typed?")   # → Answer(text, confidence, evidence[], trace)
-video.timeline(600, 900)       # → range lookup in timeline order
-video.entities()               # → linked, timestamped entities
-video.receipt()                # → how this context was generated
+video.graph()                  # → derived EvidenceGraph (memoized)
+video.query_plan("after the error?")  # → inspectable intent + strategy
+video.context_package(task)    # → budgeted agent package (JSON/Markdown)
 ```
 
 Three methods for the common case; `ProcessingConfig` for everything else. The facade is
@@ -218,18 +248,44 @@ thin — it composes the layers below and holds no logic of its own.
 ### Layer 6 — surfaces
 
 - **CLI** (`videocontent`): `process · inspect · search · at · timeline · events ·
-  entities · changes · chapters · context · ask · source · benchmark · doctor · schema`
+  entities · changes · chapters · context · graph · entity-timeline · plan ·
+  explain · compare · collection · ask · source · benchmark · doctor · schema`
   (`--json` everywhere; `--explain` on search/ask/context shows plans and traces)
 - **REST API** (`apps/api`, FastAPI): job-based; long work never blocks a request.
-  Read endpoints for timeline/segments/frames/entities/changes/chapters/receipt.
+  Read endpoints for timeline/segments/frames/entities/changes/chapters/receipt,
+  plus graph/plan/entity-timeline/evidence/explain and `/v1/collections` search,
+  entities, and compare.
 - **MCP server** (`apps/mcp`): agent tools over an existing `.vctx` — read-only,
   result-capped (`inspect_video · search_* · find_event/object · get_entities ·
-  find_changes · get_chapters · get_segment/frame/timeline · ask_video · context/profile`)
+  get_entity_timeline · get_events · get_evidence · find_changes · get_chapters ·
+  get_segment/frame/timeline · ask_video · get_context · explain_evidence/relation ·
+  find_before/after · compare_videos · register/search_collection`)
 - **Web demo** (`apps/web`, React+TS+Vite+Tailwind): upload → progress → explorer → search
 
 Surfaces are **peers**, all built on the SDK. None contains extraction logic.
 
 ---
+
+```mermaid
+flowchart LR
+    V["Video (any source)"] --> F["Facts (.vctx: stored)"]
+    F --> R["Temporal relationships"]
+    R --> E["Entities + timelines"]
+    E --> G["Evidence graph (derived)"]
+    G --> P["Query plan"]
+    P --> T["Graph-aware retrieval"]
+    T --> C["Context package (budgeted)"]
+    C --> A["Answer + trace + evidence"]
+```
+
+```mermaid
+flowchart LR
+    AGENT["Agent"] --> I["inspect_video"]
+    I --> S["search_video"]
+    S --> E2["get_evidence / explain_evidence"]
+    E2 --> T2["get_entity_timeline"]
+    T2 --> C2["get_context"]
+```
 
 ## 4. Extension model
 
@@ -339,9 +395,12 @@ src/videocontent/
 ├── media/          ffmpeg boundary: probe, frames, audio
 ├── processing/     sampling · scenes · ocr · asr · vision · events · pipeline
 ├── retrieval/      index · lexical · fusion · query (+ temporal queries)
-├── temporal.py     relations · windows · changes · chapters · UI states
-├── entities.py     timestamped entities + cross-modal linking
-├── collection.py   multi-video index + comparison (no merging)
+├── temporal.py     relations · windows · changes · chapters · UI states · chains
+├── entities.py     timestamped entities + linking + timelines
+├── graph.py        derived evidence graph + explanations
+├── queryplan.py    intent taxonomy + temporal language + plans
+├── packages.py     first-class context packages + redaction
+├── collection.py   multi-video index + linking + comparison (no merging)
 ├── plans.py        task → stages + coverage (inspectable, never auto-runs)
 ├── routing/        task classification · context budgets · packaging
 ├── embeddings/     providers

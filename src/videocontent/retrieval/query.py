@@ -132,6 +132,39 @@ class SearchResult:
         }
 
 
+@dataclass(frozen=True)
+class RetrievalExplanation:
+    """Why each span was returned, with every score labeled.
+
+    ``lexical`` is measured (BM25-derived fusion); ``temporal``, ``entity`` and
+    ``graph`` are heuristics — ``heuristic=True`` says so on every span rather
+    than burying it in documentation.
+    """
+
+    strategy: str
+    plan: dict[str, Any] | None = None
+    lexical_candidates: int = 0
+    entity_matches: tuple[str, ...] = ()
+    graph_expansions: tuple[dict[str, Any], ...] = ()
+    temporal_operations: tuple[str, ...] = ()
+    scores: dict[str, dict[str, Any]] = field(default_factory=dict)
+    omitted: tuple[dict[str, Any], ...] = ()
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "strategy": self.strategy,
+            "plan": self.plan,
+            "lexical_candidates": self.lexical_candidates,
+            "entity_matches": list(self.entity_matches),
+            "graph_expansions": [dict(e) for e in self.graph_expansions],
+            "temporal_operations": list(self.temporal_operations),
+            "scores": {k: dict(v) for k, v in self.scores.items()},
+            "omitted": [dict(o) for o in self.omitted],
+            "warnings": list(self.warnings),
+        }
+
+
 class Retriever:
     """A document prepared for querying.
 
@@ -433,36 +466,25 @@ class Retriever:
         config = self.config
         limit = config.top_k if top_k is None else top_k
         plan = parse_temporal_query(question)
+        if expand_s != 5.0:
+            import dataclasses
+
+            plan = dataclasses.replace(plan, radius_s=expand_s)
         if not plan.is_temporal:
             return plan, self.search(question, modalities=modalities, top_k=top_k)
 
-        if plan.first_only and not plan.start and not plan.end and not plan.relation:
-            result = self.search(plan.anchor, modalities=modalities,
-                                 top_k=max(limit * 5, 25) if limit > 0 else 0)
-            ordered = sorted(result.spans, key=lambda s: (s.start, s.end))
-            kept = ordered if limit <= 0 else ordered[:limit]
-            first = kept[0] if kept else None
-            spans = tuple(
-                EvidenceSpan(
-                    start=s.start, end=s.end, modality=s.modality, text=s.text,
-                    score=s.score, ref_ids=s.ref_ids, segment_ids=s.segment_ids,
-                    matched_terms=s.matched_terms,
-                    reason=f"{s.reason}; first occurrence of {plan.anchor!r}"
-                    if s.reason else f"first occurrence of {plan.anchor!r}",
-                    confidence=s.confidence, language=s.language, kind=s.kind,
-                    video_id=s.video_id,
-                )
-                for s in kept
-            )
-            note = (f"first occurrence of {plan.anchor!r}"
-                    + (f" at {first.timecode}" if first else "; nothing matched"),)
-            return plan, SearchResult(
-                query=question, spans=spans, modalities=result.modalities,
-                total=len(ordered), took_ms=(time.perf_counter() - began) * 1000.0,
-                notes=result.notes + note)
+        if plan.anchor_b is not None:
+            return self._between_anchors(plan, modalities, limit, began)
+
+        if (plan.first_only or plan.last_only) and not plan.start and not plan.end \
+                and not plan.relation:
+            return self._first_last(plan, modalities, limit, began)
 
         if plan.relation in (TemporalRelation.BEFORE, TemporalRelation.AFTER):
             return plan, self._before_after(plan, modalities, limit, began)
+
+        if plan.relation is TemporalRelation.DURING:
+            return plan, self._during(plan, modalities, limit, began)
 
         # Ranged query (explicit timecodes, or co-occurrence expansion around a match).
         anchor_text = plan.anchor or question
@@ -501,12 +523,247 @@ class Retriever:
                 query=question, spans=spans, modalities=base.modalities,
                 total=base.total, took_ms=(time.perf_counter() - began) * 1000.0,
                 notes=(*base.notes, f"constrained to {window_label}"))
-        # Co-occurrence ("while"): expand each match into its temporal neighborhood.
-        expanded = self._expand_around(base.spans, expand_s, modalities, limit)
+        # Co-occurrence ("while"/"around"): expand each match into its neighborhood.
+        expanded = self._expand_around(base.spans, plan.radius_s, modalities, limit)
         return plan, SearchResult(
             query=question, spans=expanded, modalities=base.modalities,
             total=len(expanded), took_ms=(time.perf_counter() - began) * 1000.0,
-            notes=(*base.notes, f"expanded ±{expand_s:g}s around matches"))
+            notes=(*base.notes, f"expanded ±{plan.radius_s:g}s around matches"))
+
+    def _first_last(
+        self,
+        plan: TemporalQuery,
+        modalities: Sequence[str] | None,
+        limit: int,
+        began: float,
+    ) -> SearchResult:
+        """Earliest (or latest) occurrence of the anchor — temporal order, not rank."""
+        result = self.search(plan.anchor, modalities=modalities,
+                             top_k=max(limit * 5, 25) if limit > 0 else 0)
+        ordered = sorted(result.spans, key=lambda s: (s.start, s.end))
+        if plan.last_only:
+            ordered = ordered[::-1]
+        kept = ordered if limit <= 0 else ordered[:limit]
+        marker = kept[0] if kept else None
+        which = "last" if plan.last_only else "first"
+        spans = tuple(
+            EvidenceSpan(
+                start=s.start, end=s.end, modality=s.modality, text=s.text,
+                score=s.score, ref_ids=s.ref_ids, segment_ids=s.segment_ids,
+                matched_terms=s.matched_terms,
+                reason=f"{s.reason}; {which} occurrence of {plan.anchor!r}"
+                if s.reason else f"{which} occurrence of {plan.anchor!r}",
+                confidence=s.confidence, language=s.language, kind=s.kind,
+                video_id=s.video_id,
+            )
+            for s in kept
+        )
+        note = (f"{which} occurrence of {plan.anchor!r}"
+                + (f" at {marker.timecode}" if marker else "; nothing matched"),)
+        return plan, SearchResult(
+            query=plan.raw, spans=spans, modalities=result.modalities,
+            total=len(ordered), took_ms=(time.perf_counter() - began) * 1000.0,
+            notes=(*result.notes, note))
+
+    def _during(
+        self,
+        plan: TemporalQuery,
+        modalities: Sequence[str] | None,
+        limit: int,
+        began: float,
+    ) -> SearchResult:
+        """Facts overlapping the anchor's own span ('visible during the demo')."""
+        selected = self._selected(modalities)
+        anchors = self.search(plan.anchor, modalities=modalities, top_k=5)
+        if not anchors:
+            return SearchResult(
+                query=plan.raw, spans=(), modalities=selected, total=0,
+                took_ms=(time.perf_counter() - began) * 1000.0,
+                notes=(f"anchor {plan.anchor!r} matched nothing",))
+        pivot = anchors.spans[0]
+        pool = [record for record in self.records
+                if record.modality in selected
+                and record.start < pivot.end - 1e-6 and pivot.start < record.end - 1e-6]
+        pool.sort(key=lambda r: (r.start, r.key))
+        kept = pool if limit <= 0 else pool[:limit]
+        spans = tuple(
+            _record_to_span(record, 1.0,
+                            f"overlaps {plan.anchor!r} at {pivot.timecode}")
+            for record in kept
+        )
+        return SearchResult(
+            query=plan.raw, spans=spans, modalities=selected, total=len(pool),
+            took_ms=(time.perf_counter() - began) * 1000.0,
+            notes=(f"overlapping top {plan.anchor!r} match at {pivot.timecode}",))
+
+    def _between_anchors(
+        self,
+        plan: TemporalQuery,
+        modalities: Sequence[str] | None,
+        limit: int,
+        began: float,
+    ) -> SearchResult:
+        """Facts between two named anchors ('between the login and the error')."""
+        selected = self._selected(modalities)
+        first = self.search(plan.anchor, modalities=modalities, top_k=5)
+        second = self.search(plan.anchor_b or "", modalities=modalities, top_k=5)
+        if not first or not second:
+            missing = plan.anchor if not first else plan.anchor_b
+            return SearchResult(
+                query=plan.raw, spans=(), modalities=selected, total=0,
+                took_ms=(time.perf_counter() - began) * 1000.0,
+                notes=(f"anchor {missing!r} matched nothing",))
+        a, b = first.spans[0], second.spans[0]
+        start, end = (a.end, b.start) if a.start <= b.start else (b.end, a.start)
+        windowed = self.timeline(max(0.0, start), end, modalities=modalities,
+                                 top_k=limit)
+        return plan, SearchResult(
+            query=plan.raw, spans=windowed.spans, modalities=windowed.modalities,
+            total=windowed.total,
+            took_ms=(time.perf_counter() - began) * 1000.0,
+            notes=(f"between {plan.anchor!r} at {a.timecode} and "
+                   f"{plan.anchor_b!r} at {b.timecode}",))
+
+    def search_graph(
+        self,
+        query: str,
+        *,
+        plan: TemporalQuery | None = None,
+        graph: Any | None = None,
+        top_k: int | None = None,
+        modalities: Sequence[str] | None = None,
+        expand_hops: int = 1,
+        max_expansion: int = 20,
+    ) -> tuple[SearchResult, RetrievalExplanation]:
+        """Lexical + temporal + entity + graph retrieval, explained.
+
+        Pipeline: temporal-or-lexical base → entity occurrence matches →
+        bounded graph expansion → heuristic rerank → selection. Every added span
+        carries a reason naming the rule; every score is labeled measured or
+        heuristic in the explanation.
+        """
+        from ..entities import candidate_terms, extract_entities, normalize_name
+        from ..graph import build_graph
+
+        began = time.perf_counter()
+        config = self.config
+        limit = config.top_k if top_k is None else top_k
+        parsed = plan if plan is not None else parse_temporal_query(query)
+        base_plan, base = self.query_temporal(query, modalities=modalities, top_k=top_k)
+        temporal_ops = tuple(base.notes) if parsed.is_temporal else ()
+
+        # Entity matches: query terms resolving to extracted entities.
+        entities = extract_entities(self.doc)
+        known = {normalize_name(entity.name): entity for entity in entities}
+        query_key = normalize_name(query)
+        query_terms = {normalize_name(term) for term in candidate_terms(query)}
+        matched = []
+        for key, entity in known.items():
+            if not key:
+                continue
+            if key in query_key or query_key in key or key in query_terms:
+                matched.append(entity)
+                continue
+            entity_tokens = set(key.split())
+            if query_terms & entity_tokens and len(query_terms & entity_tokens) >= 1 \
+                    and any(len(t) >= 5 for t in query_terms & entity_tokens):
+                matched.append(entity)
+        entity_spans: list[EvidenceSpan] = []
+        for entity in matched[:5]:
+            for occurrence in entity.timeline()[:10]:
+                record = self._by_key.get(f"{occurrence.modality}:{occurrence.ref_id}")
+                if record is None:
+                    for candidate in self.records:
+                        if candidate.id == occurrence.ref_id:
+                            record = candidate
+                            break
+                if record is None or record.modality not in self._selected(modalities):
+                    continue
+                entity_spans.append(_record_to_span(
+                    record, entity.confidence,
+                    f"occurrence of entity {entity.name!r} "
+                    f"(confidence {entity.confidence:.2f})"))
+
+        # Graph expansion around the top base spans.
+        graph = graph if graph is not None else build_graph(self.doc)
+        expansions: list[dict[str, Any]] = []
+        expansion_spans: list[EvidenceSpan] = []
+        frontier = [ref for span in base.spans[:5] for ref in span.ref_ids]
+        seen_hops = 0
+        current = list(dict.fromkeys(frontier))
+        for _ in range(max(0, expand_hops)):
+            nxt: list[str] = []
+            for node_id in current:
+                for node, edge in graph.neighbors(node_id):
+                    if not node.observed or node.id in frontier:
+                        continue
+                    if len(expansion_spans) >= max_expansion:
+                        break
+                    record = next((r for r in self.records if r.id == node.id), None)
+                    if record is None or record.modality not in self._selected(modalities):
+                        continue
+                    discount = 0.5 ** (seen_hops + 1)
+                    expansion_spans.append(_record_to_span(
+                        record, discount,
+                        f"graph: {edge.relation} of {node_id} ({edge.rule[:100]})"))
+                    expansions.append({"from": node_id, "to": node.id,
+                                       "relation": edge.relation,
+                                       "reason": edge.rule[:200]})
+                    frontier.append(node.id)
+                    nxt.append(node.id)
+                if len(expansion_spans) >= max_expansion:
+                    break
+            seen_hops += 1
+            current = nxt
+            if not current:
+                break
+
+        # Rerank: base order first, then entity matches, then expansion.
+        ordered = list(base.spans) + [s for s in entity_spans
+                                      if s.ref_ids not in [b.ref_ids for b in base.spans]]
+        ordered += [s for s in expansion_spans
+                    if s.ref_ids not in [b.ref_ids for b in ordered]]
+        kept = ordered if limit <= 0 else ordered[:limit]
+        omitted = tuple({"ref_ids": list(s.ref_ids), "why": "rank cutoff"}
+                        for s in ordered[len(kept):][:10])
+
+        def key(span: EvidenceSpan) -> str:
+            return f"{span.modality}:{','.join(span.ref_ids)}"
+
+        scores = {
+            key(span): {
+                "lexical": round(span.score, 4),
+                "temporal": 0.0, "entity": 0.0, "graph": 0.0,
+                "final": round(span.score, 4), "heuristic": False,
+            }
+            for span in base.spans
+        }
+        for span in entity_spans:
+            scores[key(span)] = {"lexical": 0.0, "temporal": 0.0,
+                                 "entity": round(span.score, 4), "graph": 0.0,
+                                 "final": round(span.score, 4), "heuristic": True}
+        for span in expansion_spans:
+            scores[key(span)] = {"lexical": 0.0, "temporal": 0.0, "entity": 0.0,
+                                 "graph": round(span.score, 4),
+                                 "final": round(span.score, 4), "heuristic": True}
+        explanation = RetrievalExplanation(
+            strategy="lexical+temporal+entity+graph",
+            plan=parsed.to_dict(),
+            lexical_candidates=base.total,
+            entity_matches=tuple(e.name for e in matched[:5]),
+            graph_expansions=tuple(expansions),
+            temporal_operations=temporal_ops,
+            scores=scores,
+            omitted=omitted,
+            warnings=tuple(f"graph expansion capped at {max_expansion}"
+                           for _ in [0] if len(expansion_spans) >= max_expansion),
+        )
+        notes = (*base.notes, f"graph: {len(expansions)} expansions, "
+                              f"{len(matched)} entity matches")
+        return (SearchResult(query=query, spans=tuple(kept), modalities=base.modalities,
+                             total=len(ordered),
+                             took_ms=(time.perf_counter() - began) * 1000.0, notes=notes),
+                explanation)
 
     def _before_after(
         self,
@@ -528,14 +785,19 @@ class Retriever:
         # not merely the earliest — "before the error" means before the error match
         # the retriever is most confident about.
         before = plan.relation is TemporalRelation.BEFORE
-        pool = [
-            record for record in self.records
-            if record.modality in selected
-            and ((record.end <= pivot.start + 1e-6) if before
-                 else (record.start >= pivot.end - 1e-6))
-        ]
-        pool.sort(key=lambda r: (-r.end if before else r.start, r.key))
-        kept = pool if limit <= 0 else pool[:limit]
+        pool = []
+        for record in self.records:
+            if record.modality not in selected:
+                continue
+            gap = (pivot.start - record.end) if before else (record.start - pivot.end)
+            if gap < -1e-6:
+                continue
+            if plan.max_gap_s is not None and gap > plan.max_gap_s:
+                continue  # "immediately after" means within max_gap_s, not any time after
+            pool.append((gap, record))
+        pool.sort(key=lambda pair: (pair[0], pair[1].key))
+        kept = [record for _, record in pool] if limit <= 0 else \
+            [record for _, record in pool[:limit]]
         pivot_tc = format_timecode(pivot.start if before else pivot.end)
         spans = tuple(
             _record_to_span(
@@ -548,11 +810,13 @@ class Retriever:
             )
             for record in kept
         )
+        gap_note = f" within {plan.max_gap_s:g}s" if plan.max_gap_s is not None else ""
         return SearchResult(
             query=plan.raw, spans=spans, modalities=selected, total=len(pool),
             took_ms=(time.perf_counter() - began) * 1000.0,
             notes=(f"{'before' if before else 'after'} top {plan.anchor!r} match "
-                   f"at {pivot_tc} ({len(anchors.spans)} anchor matches considered)",))
+                   f"at {pivot_tc}{gap_note} "
+                   f"({len(anchors.spans)} anchor matches considered)",))
 
     def _expand_around(
         self,

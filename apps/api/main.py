@@ -10,6 +10,19 @@ Endpoints:
 - GET    /v1/videos/{video_id}/timeline Get timeline view
 - GET    /v1/videos/{video_id}/segments Get segments
 - GET    /v1/videos/{video_id}/frames   Get sampled frames
+- GET    /v1/videos/{video_id}/entities Get entities
+- GET    /v1/videos/{video_id}/changes  Get changes
+- GET    /v1/videos/{video_id}/chapters Get chapters
+- GET    /v1/videos/{video_id}/receipt  Get processing receipt
+- GET    /v1/videos/{video_id}/graph    Get evidence graph stats
+- POST   /v1/videos/{video_id}/plan     Build an inspectable query plan
+- GET    /v1/videos/{video_id}/entity-timeline  Entity occurrences in time order
+- GET    /v1/videos/{video_id}/evidence Get exact facts by ID
+- GET    /v1/videos/{video_id}/explain  Explain a node or edge
+- POST   /v1/collections         Register a multi-video collection
+- POST   /v1/collections/{id}/search    Search across videos
+- GET    /v1/collections/{id}/entities  Cross-video entity links
+- POST   /v1/collections/compare Compare two videos
 - GET    /health                     Health check
 - GET    /ready                      Readiness check
 """
@@ -21,7 +34,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, status
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -33,6 +46,7 @@ from videocontent.schema.v1 import VideoContextDocument
 jobs: dict[str, dict[str, Any]] = {}
 video_files: dict[str, Path] = {}
 video_docs: dict[str, VideoContextDocument] = {}
+collections: dict[str, list[str]] = {}
 
 
 @asynccontextmanager
@@ -641,3 +655,126 @@ if __name__ == "__main__":
     import uvicorn
 
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
+
+# --- Agent intelligence ------------------------------------------------------
+
+
+class PlanRequest(BaseModel):
+    question: str
+
+
+class CollectionRequest(BaseModel):
+    video_ids: list[str] = Field(min_length=2, max_length=50)
+
+
+class CollectionSearchRequest(BaseModel):
+    query: str
+    top_k: int = Field(default=10, ge=1, le=50)
+
+
+class CompareRequest(BaseModel):
+    video_a: str
+    video_b: str
+
+
+@app.get("/v1/videos/{video_id}/graph")
+async def get_graph(video_id: str) -> dict[str, Any]:
+    """Evidence graph stats (nodes/edges by kind)."""
+    doc = _get_doc(video_id)
+    video = Video.from_document(doc)
+    return video.graph().stats()
+
+
+@app.post("/v1/videos/{video_id}/plan")
+async def get_plan(video_id: str, request: PlanRequest) -> dict[str, Any]:
+    """Inspectable query plan: intent, entities, strategy, coverage."""
+    doc = _get_doc(video_id)
+    video = Video.from_document(doc)
+    return video.query_plan(request.question)
+
+
+@app.get("/v1/videos/{video_id}/entity-timeline")
+async def get_entity_timeline(video_id: str, name: str) -> dict[str, Any]:
+    """Every occurrence of an entity in time order."""
+    doc = _get_doc(video_id)
+    video = Video.from_document(doc)
+    timeline = video.entity_timeline(name)
+    if timeline is None:
+        raise HTTPException(status_code=404, detail=f"No entity named {name!r}")
+    return timeline.to_dict()
+
+
+@app.get("/v1/videos/{video_id}/evidence")
+async def get_evidence(video_id: str, ref: list[str] = Query([])) -> list[dict[str, Any]]:
+    """Exact facts behind reference IDs (?ref=a&ref=b, cap 30)."""
+    doc = _get_doc(video_id)
+    out: list[dict[str, Any]] = []
+    for ref_id in (ref or [])[:30]:
+        item = doc.by_id(ref_id)
+        if item is None:
+            continue
+        payload = item.model_dump(mode="json") if hasattr(item, "model_dump") else {}
+        payload["id"] = ref_id
+        out.append(payload)
+    return out
+
+
+@app.get("/v1/videos/{video_id}/explain")
+async def get_explain(video_id: str, ref: str) -> dict[str, Any]:
+    """Explain a graph node (supporting evidence) or edge (construction rule)."""
+    doc = _get_doc(video_id)
+    video = Video.from_document(doc)
+    explanation = video.explain(ref)
+    if explanation is None:
+        raise HTTPException(status_code=404, detail=f"No node or edge {ref!r}")
+    return explanation
+
+
+@app.post("/v1/collections", status_code=status.HTTP_201_CREATED)
+async def create_collection(request: CollectionRequest) -> dict[str, Any]:
+    """Register a named multi-video collection (timestamps stay video-local)."""
+    missing = [vid for vid in request.video_ids if vid not in video_docs]
+    if missing:
+        raise HTTPException(status_code=404,
+                            detail=f"Unknown videos (process them first): {missing}")
+    collection_id = str(uuid.uuid4())
+    collections[collection_id] = list(request.video_ids)
+    return {"collection_id": collection_id, "video_ids": collections[collection_id]}
+
+
+def _get_collection(collection_id: str) -> dict[str, VideoContextDocument]:
+    if collection_id not in collections:
+        raise HTTPException(status_code=404, detail="Collection not found")
+    return {vid: video_docs[vid] for vid in collections[collection_id] if vid in video_docs}
+
+
+@app.post("/v1/collections/{collection_id}/search")
+async def search_collection(collection_id: str,
+                            request: CollectionSearchRequest) -> dict[str, Any]:
+    """Search across videos; every span keeps its video_id."""
+    from videocontent.collection import CollectionIndex
+
+    docs = _get_collection(collection_id)
+    return CollectionIndex(docs).search(request.query, top_k=request.top_k).to_dict()
+
+
+@app.get("/v1/collections/{collection_id}/entities")
+async def collection_entities(collection_id: str) -> dict[str, Any]:
+    """Cross-video entity links; video-local evidence stays attached."""
+    from videocontent.collection import CollectionIndex
+
+    docs = _get_collection(collection_id)
+    return {"links": CollectionIndex(docs).link_entities()}
+
+
+@app.post("/v1/collections/compare")
+async def compare_videos(request: CompareRequest) -> dict[str, Any]:
+    """Added/removed/changed/unchanged entities plus structure."""
+    from videocontent.collection import compare
+
+    for vid in (request.video_a, request.video_b):
+        if vid not in video_docs:
+            raise HTTPException(status_code=404, detail=f"Unknown video: {vid}")
+    return compare(request.video_a, video_docs[request.video_a],
+                   request.video_b, video_docs[request.video_b]).to_dict()

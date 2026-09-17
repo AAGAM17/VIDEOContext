@@ -109,7 +109,13 @@ def _terms_in(text: str) -> list[str]:
     return out
 
 
-def extract_entities(doc: Any) -> list[Entity]:
+def candidate_terms(text: str) -> list[str]:
+    """Quoted strings and capitalized phrases — the raw material of term entities."""
+    return _terms_in(text)
+
+
+def extract_entities(doc: Any, *, aliases: dict[str, str] | None = None,
+                     similarity: float | None = None) -> list[Entity]:
     """Extract entities from a document. Deterministic for a given document.
 
     Detectors (no models, no network):
@@ -117,6 +123,14 @@ def extract_entities(doc: Any) -> list[Entity]:
     - ``shell_prompt``: ``command_entered`` events → COMMAND entities.
     - ``term``: repeated capitalized/quoted phrases in OCR + transcript, linked
       across modalities on temporal co-occurrence.
+
+    ``aliases`` maps a normalized name to an explicit canonical display name
+    ("connection error" → "ConnectionError"); aliased merges are user knowledge,
+    so they are high-confidence and never ambiguous. ``similarity`` (0, 1] also
+    merges mention groups whose normalized names are that similar (difflib ratio)
+    *and* co-occur in time; ``None`` disables it, preserving default behavior.
+    Same-name entities from different detectors are never silently merged — they
+    stay separate and link via SAME_CONCEPT in the evidence graph.
     """
     entities: list[Entity] = []
     counter = 0
@@ -169,7 +183,7 @@ def extract_entities(doc: Any) -> list[Entity]:
 
     # Merge mentions that name the same concept at different granularities
     # ("Stripe" vs "Stripe API"): shared content tokens + temporal proximity.
-    groups = _merge_mentions(mentions)
+    groups = _merge_mentions(mentions, similarity=similarity)
     for display, occ in groups:
         modalities = {o.modality for o in occ}
         linked = len(modalities) >= 2 and any(
@@ -185,16 +199,48 @@ def extract_entities(doc: Any) -> list[Entity]:
         entities.append(Entity(_next("ent"), display, "CONCEPT", occ,
                                confidence, "term", ambiguous))
 
+    if aliases:
+        entities = _apply_aliases(entities, aliases, _next)
+
     entities.sort(key=lambda e: (-e.confidence, -(e.first_seen or 0.0)))
     return entities[:_MAX_ENTITIES]
 
 
-def _merge_mentions(mentions: dict[str, dict[str, Any]]) -> list[tuple[str, list[Occurrence]]]:
+def _apply_aliases(entities: list[Entity], aliases: dict[str, str],
+                   _next: Any) -> list[Entity]:
+    """Merge entities whose normalized names map to the same canonical display."""
+    canonical = {normalize_name(alias): display for alias, display in aliases.items()}
+    grouped: dict[str, list[Entity]] = {}
+    for entity in entities:
+        grouped.setdefault(canonical.get(normalize_name(entity.name),
+                                         normalize_name(entity.name)), []).append(entity)
+    out: list[Entity] = []
+    for display, group in grouped.items():
+        if len(group) == 1:
+            out.append(group[0])
+            continue
+        occ = sorted((o for member in group for o in member.occurrences),
+                     key=lambda o: (o.start, o.end))
+        primary = max(group, key=lambda member: member.confidence)
+        out.append(Entity(_next("ent"), display, primary.type, occ, 0.95,
+                          primary.method + "+alias", False))
+    return out
+
+
+def _merge_mentions(mentions: dict[str, dict[str, Any]],
+                    *, similarity: float | None = None,
+                    ) -> list[tuple[str, list[Occurrence]]]:
     """Union mentions sharing a content token that co-occur in time.
+
+    With ``similarity`` set, also unions names whose difflib ratio reaches it
+    ("Postgres" vs "Postgress") — still gated on temporal proximity, so distant
+    lookalikes never merge.
 
     Returns ``(display, occurrences)`` per group; display is the longest variant,
     which is the most informative ("Stripe API Dashboard", not "Stripe").
     """
+    import difflib
+
     keys = list(mentions)
     parent = {k: k for k in keys}
 
@@ -207,10 +253,15 @@ def _merge_mentions(mentions: dict[str, dict[str, Any]]) -> list[tuple[str, list
     def tokens(key: str) -> set[str]:
         return {t for t in key.split() if len(t) >= 3}
 
+    def compatible(ka: str, kb: str) -> bool:
+        shared = tokens(ka) & tokens(kb)
+        if shared and any(len(t) >= 4 for t in shared):
+            return True
+        return bool(similarity) and difflib.SequenceMatcher(None, ka, kb).ratio() >= similarity
+
     for i, ka in enumerate(keys):
         for kb in keys[i + 1:]:
-            shared = tokens(ka) & tokens(kb)
-            if not shared or not any(len(t) >= 4 for t in shared):
+            if not compatible(ka, kb):
                 continue  # short words ("api", "app") collide too easily alone
             occ_a, occ_b = mentions[ka]["occ"], mentions[kb]["occ"]
             if any(_near(a, b) for a in occ_a for b in occ_b):
@@ -232,5 +283,111 @@ def entity_timeline(entity: Entity) -> list[Occurrence]:
     return entity.timeline()
 
 
-__all__ = ["LINK_TOLERANCE_S", "Entity", "Occurrence", "entity_timeline", "extract_entities",
-           "normalize_name"]
+@dataclass
+class EntityTimeline:
+    """One entity's life in the video: every sighting plus its neighborhood.
+
+    Temporal occurrence (first/last/between) is computed over occurrence
+    timestamps — never confused with retrieval rank.
+    """
+
+    entity: Entity
+
+    @property
+    def occurrences(self) -> list[Occurrence]:
+        return self.entity.timeline()
+
+    def first_occurrence(self) -> Occurrence | None:
+        occs = self.occurrences
+        return occs[0] if occs else None
+
+    def last_occurrence(self) -> Occurrence | None:
+        occs = self.occurrences
+        return occs[-1] if occs else None
+
+    def occurrences_between(self, start: float, end: float) -> list[Occurrence]:
+        return [o for o in self.occurrences if o.start < end and start < o.end]
+
+    def occurrences_before(self, ts: float) -> list[Occurrence]:
+        return [o for o in self.occurrences if o.end <= ts]
+
+    def occurrences_after(self, ts: float) -> list[Occurrence]:
+        return [o for o in self.occurrences if o.start >= ts]
+
+    def surrounding_context(self, doc: Any, radius_s: float = 10.0) -> dict[str, list[Any]]:
+        """Facts overlapping each occurrence's neighborhood, merged and time-ordered."""
+        first, last = self.first_occurrence(), self.last_occurrence()
+        if first is None or last is None:
+            return {}
+        window = doc.window(max(0.0, first.start - radius_s), last.end + radius_s)
+        for key, items in window.items():
+            window[key] = sorted(items, key=lambda item: (item.start, item.end))
+        return window
+
+    def related_events(self, doc: Any) -> list[Any]:
+        """Events overlapping any occurrence — co-occurrence, not causation."""
+        occs = self.occurrences
+        return sorted(
+            (event for event in getattr(doc, "events", [])
+             if any(o.start < event.end and event.start < o.end for o in occs)),
+            key=lambda event: (event.start, event.end))
+
+    def related_entities(self, entities: list[Entity]) -> list[Entity]:
+        """Other entities whose occurrences overlap this one's."""
+        mine = self.occurrences
+        return sorted(
+            (other for other in entities if other.id != self.entity.id and any(
+                a.start < b.end and b.start < a.end
+                for a in mine for b in other.occurrences)),
+            key=lambda other: (other.first_seen or 0.0))
+
+    def supporting_evidence(self) -> list[str]:
+        """Reference IDs behind every occurrence, in time order."""
+        return [o.ref_id for o in self.occurrences]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "entity": self.entity.to_dict(),
+            "first": self.first_occurrence().to_dict() if self.first_occurrence() else None,
+            "last": self.last_occurrence().to_dict() if self.last_occurrence() else None,
+            "count": len(self.occurrences),
+        }
+
+
+def _by_name(entities: list[Entity], name: str) -> list[Entity]:
+    key = normalize_name(name)
+    return [e for e in entities if normalize_name(e.name) == key]
+
+
+def find_first(entities: list[Entity], name: str) -> Occurrence | None:
+    """Earliest temporal occurrence of ``name`` — not the top retrieval hit."""
+    occs = [o for e in _by_name(entities, name) for o in e.occurrences]
+    return min(occs, key=lambda o: (o.start, o.end)) if occs else None
+
+
+def find_last(entities: list[Entity], name: str) -> Occurrence | None:
+    occs = [o for e in _by_name(entities, name) for o in e.occurrences]
+    return max(occs, key=lambda o: (o.start, o.end)) if occs else None
+
+
+def find_all(entities: list[Entity], name: str) -> list[Occurrence]:
+    return sorted((o for e in _by_name(entities, name) for o in e.occurrences),
+                  key=lambda o: (o.start, o.end))
+
+
+def find_before(entities: list[Entity], name: str, ts: float) -> list[Occurrence]:
+    return [o for o in find_all(entities, name) if o.end <= ts]
+
+
+def find_after(entities: list[Entity], name: str, ts: float) -> list[Occurrence]:
+    return [o for o in find_all(entities, name) if o.start >= ts]
+
+
+def find_between(entities: list[Entity], name: str, start: float,
+                 end: float) -> list[Occurrence]:
+    return [o for o in find_all(entities, name) if o.start < end and start < o.end]
+
+
+__all__ = ["LINK_TOLERANCE_S", "Entity", "EntityTimeline", "Occurrence", "candidate_terms",
+           "entity_timeline", "extract_entities", "find_after", "find_all", "find_before",
+           "find_between", "find_first", "find_last", "normalize_name"]

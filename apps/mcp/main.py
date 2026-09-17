@@ -35,6 +35,7 @@ from mcp.types import (
 
 from videocontent import load
 from videocontent.schema.v1 import VideoContextDocument
+from videocontent.sdk import Video
 from videocontent.timecode import format_timecode
 
 # Agent-facing caps: tools return minimal relevant context, never whole documents.
@@ -43,6 +44,9 @@ _MAX_TEXT = 200
 
 # Global document cache
 _docs: dict[str, VideoContextDocument] = {}
+
+# Named multi-video collections: id -> video ids. Timestamps stay video-local.
+_collections: dict[str, list[str]] = {}
 
 
 def _get_doc(video_id: str) -> VideoContextDocument:
@@ -74,6 +78,19 @@ def _bounded(value: int, default: int) -> int:
         return max(1, min(int(value), _MAX_ITEMS))
     except (TypeError, ValueError):
         return default
+
+
+def _gap_of(span, word: str) -> float | None:
+    """Gap seconds parsed from a before/after reason; None when absent."""
+    import re
+
+    match = re.search(r"(ends|starts) ([\d.]+)s (before|after)", span.reason or "")
+    if match and match.group(3) == word:
+        try:
+            return float(match.group(2))
+        except ValueError:
+            return None
+    return None
 
 
 async def main():
@@ -282,17 +299,212 @@ async def main():
                     "required": ["video_id"],
                 },
             ),
+            Tool(
+                name="get_entity_timeline",
+                description="Every occurrence of an entity in time order, with evidence",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "entity": {"type": "string", "description": "Entity name"},
+                    },
+                    "required": ["video_id", "entity"],
+                },
+            ),
+            Tool(
+                name="get_events",
+                description="Events in a time range, optionally filtered by type",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "event_type": {"type": "string", "description": "Only this type"},
+                        "start": {"type": "number", "description": "Range start (seconds)"},
+                        "end": {"type": "number", "description": "Range end (seconds)"},
+                        "top_k": {"type": "integer", "default": 30},
+                    },
+                    "required": ["video_id"],
+                },
+            ),
+            Tool(
+                name="get_evidence",
+                description="Exact facts behind reference IDs (inspect search hits)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "refs": {"type": "array", "items": {"type": "string"},
+                                 "description": "Fact IDs, e.g. from span ref_ids"},
+                    },
+                    "required": ["video_id", "refs"],
+                },
+            ),
+            Tool(
+                name="get_context",
+                description="Budgeted context package for a task (markdown or json)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "task": {"type": "string", "description": "Task description"},
+                        "max_spans": {"type": "integer", "default": 5},
+                        "max_tokens": {"type": "integer", "default": 2000},
+                        "format": {"type": "string", "default": "markdown",
+                                   "description": "markdown or json"},
+                    },
+                    "required": ["video_id", "task"],
+                },
+            ),
+            Tool(
+                name="explain_evidence",
+                description="Why a node/fact is trusted: supporting evidence and relations",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "ref": {"type": "string", "description": "Node or fact ID"},
+                    },
+                    "required": ["video_id", "ref"],
+                },
+            ),
+            Tool(
+                name="explain_relation",
+                description="The construction rule behind a graph edge ID",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "edge_id": {"type": "string", "description": "Edge ID"},
+                    },
+                    "required": ["video_id", "edge_id"],
+                },
+            ),
+            Tool(
+                name="find_before",
+                description="Evidence before an anchor phrase ('immediately' supported)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "anchor": {"type": "string", "description": "Anchor phrase"},
+                        "max_gap_s": {"type": "number",
+                                      "description": "Only this close (seconds)"},
+                        "top_k": {"type": "integer", "default": 5},
+                    },
+                    "required": ["video_id", "anchor"],
+                },
+            ),
+            Tool(
+                name="find_after",
+                description="Evidence after an anchor phrase ('immediately' supported)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "anchor": {"type": "string", "description": "Anchor phrase"},
+                        "max_gap_s": {"type": "number",
+                                      "description": "Only this close (seconds)"},
+                        "top_k": {"type": "integer", "default": 5},
+                    },
+                    "required": ["video_id", "anchor"],
+                },
+            ),
+            Tool(
+                name="compare_videos",
+                description="Added/removed/changed/unchanged entities plus structure",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "First video ID"},
+                        "other_video_id": {"type": "string", "description": "Second video ID"},
+                    },
+                    "required": ["video_id", "other_video_id"],
+                },
+            ),
+            Tool(
+                name="register_collection",
+                description="Name a set of videos for collection search (timestamps stay local)",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "collection_id": {"type": "string", "description": "Name to register"},
+                        "video_ids": {"type": "array", "items": {"type": "string"},
+                                      "description": "Video IDs (2+)"},
+                    },
+                    "required": ["collection_id", "video_ids"],
+                },
+            ),
+            Tool(
+                name="search_collection",
+                description="Search across videos; every span keeps its video_id",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "collection_id": {"type": "string",
+                                         "description": "Registered collection"},
+                        "video_ids": {"type": "array", "items": {"type": "string"},
+                                      "description": "Or ad-hoc video IDs"},
+                        "query": {"type": "string", "description": "Search query"},
+                        "top_k": {"type": "integer", "default": 10},
+                    },
+                    "required": ["query"],
+                },
+            ),
         ]
 
     @server.call_tool()
     async def call_tool(name: str, arguments: dict[str, Any]) -> CallToolResult:
+        if name == "register_collection":
+            collection_id = arguments.get("collection_id", "")
+            video_ids = arguments.get("video_ids", [])
+            if not collection_id or len(video_ids) < 2:
+                return CallToolResult(content=[TextContent(
+                    type="text",
+                    text="Error: collection_id and 2+ video_ids are required")])
+            missing = [vid for vid in video_ids if vid not in _docs
+                       and not any(p.exists() for p in (
+                           Path(f"/tmp/videocontent_outputs/{vid}.vctx"),
+                           Path(f"./.videocontent/{vid}.vctx"),
+                           Path(f"{vid}.vctx")))]
+            _collections[collection_id] = list(video_ids)
+            note = f" (unloaded: {', '.join(missing)} — process them first)" if missing else ""
+            return CallToolResult(content=[TextContent(
+                type="text",
+                text=f"Registered collection {collection_id}: "
+                     f"{', '.join(video_ids)}{note}")])
+
+        if name == "search_collection":
+            query = arguments.get("query", "")
+            top_k = _bounded(arguments.get("top_k", 10), 10)
+            collection_id = arguments.get("collection_id", "")
+            video_ids = list(arguments.get("video_ids", [])
+                             or _collections.get(collection_id, []))
+            if len(video_ids) < 2:
+                return CallToolResult(content=[TextContent(
+                    type="text",
+                    text="Error: give 2+ video_ids or a registered collection_id")])
+            try:
+                from videocontent.collection import CollectionIndex
+
+                docs = {vid: _get_doc(vid) for vid in video_ids}
+                result = CollectionIndex(docs).search(query, top_k=top_k)
+                lines = [f"[{s.video_id} {s.timecode}] ({s.modality}) "
+                         f"{s.text[:_MAX_TEXT]}" for s in result.spans]
+                return CallToolResult(content=[TextContent(
+                    type="text",
+                    text=f"Found {result.total} spans across "
+                         f"{result.videos_searched} videos:\n" + "\n".join(lines))])
+            except Exception as exc:
+                return CallToolResult(content=[TextContent(
+                    type="text", text=f"Error: {type(exc).__name__}: {exc}")])
+
         video_id = arguments.get("video_id")
         if not video_id:
             return CallToolResult(content=[TextContent(type="text", text="Error: video_id is required")])
 
         try:
             doc = _get_doc(video_id)
-            video = load(doc=doc)
+            video = Video.from_document(doc)
 
             if name == "inspect_video":
                 receipt = video.receipt()
@@ -442,6 +654,147 @@ async def main():
                 profiles = video.profiles()
                 names = list(profiles.keys())
                 return CallToolResult(content=[TextContent(type="text", text=f"Available profiles: {', '.join(names) if names else 'none'}")])
+
+            elif name == "get_entity_timeline":
+                entity = arguments.get("entity", "")
+                timeline = video.entity_timeline(entity)
+                if timeline is None:
+                    return CallToolResult(content=[TextContent(type="text", text=f"No entity named '{entity}'")])
+                lines = [f"[{o.start:.1f}] ({o.modality}) {o.text[:_MAX_TEXT]}"
+                         for o in timeline.occurrences[:_MAX_ITEMS]]
+                return CallToolResult(content=[TextContent(
+                    type="text",
+                    text=f"{timeline.entity.name} [{timeline.entity.type}] "
+                         f"×{len(timeline.occurrences)}:\n" + "\n".join(lines))])
+
+            elif name == "get_events":
+                event_type = arguments.get("event_type")
+                start = arguments.get("start", 0.0)
+                end = arguments.get("end", doc.video.duration)
+                top_k = _bounded(arguments.get("top_k", 30), 30)
+                try:
+                    start, end = float(start), float(end)
+                except (TypeError, ValueError):
+                    return CallToolResult(content=[TextContent(
+                        type="text", text="Error: start/end must be numbers")])
+                events = [e for e in doc.events
+                          if (event_type is None or e.type == event_type)
+                          and e.start < end and start < e.end]
+                events.sort(key=lambda e: (e.start, e.end))
+                lines = [f"[{format_timecode(e.start)}] {e.type}: "
+                         f"{(e.description or '')[:_MAX_TEXT]}" for e in events[:top_k]]
+                suffix = f"\n({len(events) - top_k} more)" if len(events) > top_k else ""
+                return CallToolResult(content=[TextContent(
+                    type="text", text=f"Events ({start:.1f}-{end:.1f}s):\n"
+                    + "\n".join(lines) + suffix if lines else "No events in range")])
+
+            elif name == "get_evidence":
+                refs = arguments.get("refs", [])
+                if not isinstance(refs, list) or not refs:
+                    return CallToolResult(content=[TextContent(
+                        type="text", text="Error: refs must be a non-empty list of IDs")])
+                found = doc.by_id if hasattr(doc, "by_id") else None
+                lines = []
+                for ref in refs[:_MAX_ITEMS]:
+                    item = found(ref) if found else None
+                    if item is None:
+                        lines.append(f"{ref}: not found")
+                        continue
+                    text = getattr(item, "text", None) or getattr(item, "description",
+                                                                   None) or ""
+                    lines.append(f"{ref} [{getattr(item, 'start', '?')}] {text[:_MAX_TEXT]}")
+                return CallToolResult(content=[TextContent(
+                    type="text", text="Evidence:\n" + "\n".join(lines))])
+
+            elif name == "get_context":
+                task = arguments.get("task", "")
+                max_spans = _bounded(arguments.get("max_spans", 5), 5)
+                try:
+                    max_tokens = max(256, min(int(arguments.get("max_tokens", 2000)), 8000))
+                except (TypeError, ValueError):
+                    max_tokens = 2000
+                package = video.context_package(task, max_spans=max_spans,
+                                                max_tokens=max_tokens)
+                fmt = arguments.get("format", "markdown")
+                body = package.to_json() if fmt == "json" else package.to_markdown()
+                return CallToolResult(content=[TextContent(type="text", text=body)])
+
+            elif name == "explain_evidence":
+                ref = arguments.get("ref", "")
+                explanation = video.explain(ref)
+                if explanation is None:
+                    return CallToolResult(content=[TextContent(
+                        type="text", text=f"No node or fact {ref!r}")])
+                if "rule" in explanation:
+                    return CallToolResult(content=[TextContent(
+                        type="text",
+                        text=f"{explanation['relation']}: {explanation['source']} → "
+                             f"{explanation['target']}\nRule: {explanation['rule']}")])
+                node = explanation["node"]
+                support = "\n".join(
+                    f"[{s['start']:.1f}] ({s['kind']}) {s['label'][:_MAX_TEXT]}"
+                    for s in explanation["supporting_evidence"][:10])
+                return CallToolResult(content=[TextContent(
+                    type="text",
+                    text=f"{node['id']} ({node['kind']}): {node['label'][:_MAX_TEXT]}\n"
+                         f"Observed fact: {node['observed']}\nSupporting evidence:\n{support}")])
+
+            elif name == "explain_relation":
+                edge_id = arguments.get("edge_id", "")
+                graph = video.graph()
+                explanation = graph.explain(edge_id)
+                if explanation is None:
+                    return CallToolResult(content=[TextContent(
+                        type="text", text=f"No edge {edge_id!r}")])
+                return CallToolResult(content=[TextContent(
+                    type="text",
+                    text=f"{explanation['relation']}: {explanation['source']} → "
+                         f"{explanation['target']}\nRule: {explanation['rule']}\n"
+                         f"Provenance: {', '.join(explanation['provenance'])}")])
+
+            elif name in ("find_before", "find_after"):
+                anchor = arguments.get("anchor", "")
+                top_k = _bounded(arguments.get("top_k", 5), 5)
+                try:
+                    max_gap = (None if arguments.get("max_gap_s") is None
+                               else float(arguments.get("max_gap_s")))
+                except (TypeError, ValueError):
+                    return CallToolResult(content=[TextContent(
+                        type="text", text="Error: max_gap_s must be a number")])
+                word = "before" if name == "find_before" else "after"
+                _, result = video.retriever.query_temporal(
+                    f"what happened {word} {anchor}", top_k=top_k)
+                if max_gap is not None:
+                    filtered = [s for s in result.spans
+                                if _gap_of(s, word) is not None and _gap_of(s, word) <= max_gap]
+                else:
+                    filtered = list(result.spans)
+                hits = "\n".join(_format_span(h) for h in filtered)
+                return CallToolResult(content=[TextContent(
+                    type="text",
+                    text=f"{word.capitalize()} '{anchor}':\n{hits}" if hits
+                    else f"Nothing found {word} '{anchor}'")])
+
+            elif name == "compare_videos":
+                other_id = arguments.get("other_video_id", "")
+                if not other_id:
+                    return CallToolResult(content=[TextContent(
+                        type="text", text="Error: other_video_id is required")])
+                try:
+                    other_doc = _get_doc(other_id)
+                except ValueError as exc:
+                    return CallToolResult(content=[TextContent(
+                        type="text", text=f"Error: {exc}")])
+                from videocontent.collection import compare
+
+                result = compare(video_id, doc, other_id, other_doc)
+                lines = [f"added in {other_id}: {', '.join(result.added[:10]) or '—'}",
+                         f"removed: {', '.join(result.removed[:10]) or '—'}",
+                         f"changed: {', '.join(result.changed[:10]) or '—'}",
+                         f"unchanged: {len(result.unchanged)}",
+                         f"uncertain: {', '.join(result.uncertain[:10]) or '—'}"]
+                return CallToolResult(content=[TextContent(
+                    type="text", text="Comparison:\n" + "\n".join(lines))])
 
             else:
                 return CallToolResult(content=[TextContent(type="text", text=f"Unknown tool: {name}")])

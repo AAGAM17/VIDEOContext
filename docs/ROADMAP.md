@@ -76,9 +76,9 @@ The point at which VideoContext becomes useful to an *application*, not just a d
 
 ## V1.0 — Production
 
-- 🚧 Temporal reasoning queries: `before`/`after`/`between`/first-occurrence/
-  co-occurrence implemented and tested (explicit planner, no NLP framework);
-  last-occurrence and cross-video temporal joins still planned
+- 🚧 Temporal reasoning queries: `before`/`after`/`between`/first-/last-occurrence/
+  during/around/two-anchor ranges implemented and tested (explicit planner, no NLP
+  framework); cross-video temporal joins still planned
 - ⬜ Multimodal embeddings (joint text+frame space)
 - ⬜ Storage backends: S3, PostgreSQL, Redis; retention + deletion APIs
 - ⬜ Multi-tenancy: isolation, auth, quotas, audit logs
@@ -105,6 +105,31 @@ The point at which VideoContext becomes useful to an *application*, not just a d
   capped outputs), API (`/entities/changes/chapters/receipt`; fixed
   `load(doc=...)` call sites), repaired `jobs` package imports
 - ✅ Tests with every feature (unit + CLI + API); docs describe behavior only
+
+---
+
+## Agentic intelligence — shipped (this phase)
+
+- ✅ EvidenceGraph derived view (fact/entity/occurrence/change/chapter/state nodes,
+  rule-cited edges, bounded traversal, explanations) — no graph database
+- ✅ Entity resolution (aliases, opt-in lexical similarity, ambiguity preserved)
+  + EntityTimeline (first/last/between/before/after, context, related events)
+- ✅ QueryPlan engine (17-intent taxonomy, temporal language with configurable
+  gaps, coverage-aware planning that never auto-processes)
+- ✅ Graph-aware retrieval (`search_graph` with labeled measured/heuristic scores)
+  + AnswerTrace (plan, graph/temporal ops, selected/omitted, budget, coverage)
+- ✅ First-class ContextPackage (JSON/text/Markdown, anchor-preserving
+  optimization, omitted-information ledger, opt-in redaction)
+- ✅ Collection intelligence (entities/events/changes/timeline/occurrences/context,
+  cross-video linking, added/removed/changed/uncertain comparison)
+- ✅ Event/change chains (`TEMPORAL_SEQUENCE`, observed vs inferred marked),
+  UI layout signatures + app hints, receipt trust/coverage inventory
+- ✅ Surfaces: CLI (`graph/entity-timeline/plan/explain/compare/collection`),
+  MCP (13 new tools, collection registry, caps), API (graph/plan/timeline/
+  evidence/explain + `/v1/collections`)
+- ✅ `bench_intel.py` (10 cases: lookup/temporal/first/entity/change/sequence/
+  graph/collection/comparison/compression)
+- ✅ Tests with every feature; docs describe behavior only
 
 ---
 

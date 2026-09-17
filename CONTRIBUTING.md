@@ -204,6 +204,19 @@ over the document:
 4. Keep it cheap: no models, no network, no new required dependencies.
 5. Add unit tests on hand-built documents, including empty and missing-modality cases.
 
+### Add a Graph Relation, Intent, or MCP Tool
+
+- Graph relations go in `src/videocontent/graph.py` with exactly one documented
+  construction rule per edge, provenance IDs, and a `rule` string a human can
+  audit. Temporal adjacency is `TEMPORAL_SEQUENCE`, never causation.
+- Query intents go in `src/videocontent/queryplan.py` with keyword rules, a
+  retrieval strategy, graph operations, and a fallback. Every new temporal
+  phrasing needs a parser test and an executor test.
+- MCP tools must be read-only, validate arguments, cap output (`_bounded`),
+  preserve video IDs and timestamps, and never trigger processing. Mirror every
+  tool with a CLI command or SDK method that the tool delegates to — no logic
+  in the transport layer.
+
 # Development Setup
 
 Start by cloning your fork of the repository.

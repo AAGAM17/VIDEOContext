@@ -142,11 +142,14 @@ class TestSDKIntel:
     def test_ask_trace(self):
         video = Video.from_document(doc())
         answer = video.ask("What failed?")
-        assert answer.trace["executor"] == "search"
-        assert answer.trace["retrieval"]["spans"] >= 0
+        assert answer.trace["plan"]["intent"] == "fact_lookup"
+        assert answer.trace["retrieved_evidence"] >= 0
+        assert answer.trace["outcome"] in ("answered", "llm_failed")
+        assert answer.trace["answer_support"]  # evidence IDs behind the answer
         temporal = video.ask("what happened before the checkout failed")
-        assert temporal.trace["executor"] == "temporal"
-        assert "query_plan" in temporal.trace
+        assert temporal.trace["plan"]["intent"] == "temporal_before"
+        assert temporal.trace["plan"]["temporal"]["relation"] == "before"
+        assert "query_plan" not in temporal.trace  # superseded by "plan"
 
     def test_ask_no_evidence(self):
         video = Video.from_document(doc())

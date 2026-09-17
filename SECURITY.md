@@ -148,6 +148,21 @@ When running VIDEOContext:
 * Protect API keys and credentials using environment variables or secure secret-management systems
 * Review access controls before deploying VIDEOContext in production
 
+## Agent Intelligence Surfaces
+
+The evidence graph, query plans, context packages, and collection endpoints are
+read-only derived views over local `.vctx` documents:
+
+* No tool triggers processing, downloads media, or contacts providers. Coverage
+  gaps return reprocessing *suggestions*, never implicit work.
+* MCP outputs are capped (counts and text lengths); collection registration only
+  accepts already-loaded videos.
+* Context packages minimize data by budget; redaction (`redact_package` with
+  `builtin_secret_patterns`) is opt-in, pattern-based, and non-destructive —
+  the source package is never mutated.
+* Graph edges cite construction rules, not model judgments; no edge implies
+  causation (`TEMPORAL_SEQUENCE` is adjacency in time).
+
 ## Thank You
 
 Responsible vulnerability reports help improve the security of VIDEOContext and protect its users.

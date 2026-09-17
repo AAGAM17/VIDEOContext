@@ -626,6 +626,28 @@ Entities carry occurrence timestamps, linked modalities, and uncertainty
 (`ambiguous=True` when the link is weak). Chapters group scenes with
 frequency-ranked keyword titles, always `inferred=True`.
 
+## Evidence graph
+
+The derived view agents traverse — never storage, always explainable:
+
+```python
+graph = video.graph()                     # 296 nodes, 901 edges on the demo fixture
+graph.neighbors("evt_0076")               # [(node, edge)] with construction rules
+graph.path("utt_0001", "segment_0001")    # bounded BFS over rule-cited edges
+graph.supporting_evidence("evt_0076")     # observed facts behind a derived node
+graph.explain("edge_00042")               # the rule, in words, with provenance
+
+video.explain("evt_0076")                 # node view: evidence + neighbors
+video.entity_timeline("ConnectionError")  # every sighting in time order
+video.query_plan("what happened after the error?")
+# → {intent: temporal_after, entities: [...], retrieval_strategy: [...],
+#    graph_operations: [...], coverage: {...}, fallback_strategy: ...}
+```
+
+Every edge cites exactly one construction rule (`OBSERVED_IN` from segment
+membership, `DERIVED_FROM` from event refs, `PRECEDES` from timeline order…).
+Temporal adjacency is labeled `TEMPORAL_SEQUENCE`, never causation.
+
 ## Collections: many videos, one index
 
 ```python
@@ -633,10 +655,15 @@ from videocontent.collection import CollectionIndex, compare
 
 index = CollectionIndex({"demo-a": doc_a, "demo-b": doc_b})
 result = index.search("OAuth login")  # spans tagged with video_id
-diff = compare("demo-a", doc_a, "demo-b", doc_b)  # shared/unique entities + events
+index.occurrences("ConnectionError")  # every sighting across videos
+index.videos_with_all("OAuth", "checkout")  # videos containing both
+index.link_entities()                 # collection identity, local evidence kept
+diff = compare("demo-a", doc_a, "demo-b", doc_b)
+# added / removed / changed / unchanged / uncertain + structure
 ```
 
 Collections never merge files — each `.vctx` keeps its identity and provenance.
+Timestamps stay video-local; no clock is shared unless you explicitly align one.
 
 ## Minimal context packages
 
@@ -653,6 +680,12 @@ print(ctx.token_estimate, ctx.budget_notes)
 
 The pipeline is query → retrieval → temporal expansion → dedup → budget →
 package. `budget_notes` records every cut, so minimization is auditable.
+
+For agents, `video.context_package(task)` builds the full first-class package —
+planned query, budgeted evidence, entities/events/changes in play, frames, graph
+summary, provenance, warnings, and what was omitted — serializable to JSON,
+compact text, or Markdown, with opt-in secret redaction that never mutates the
+original.
 
 ---
 
@@ -879,6 +912,22 @@ videocontent context demo.vctx "What caused the checkout error?" \
   --expand-s 5 \
   --explain
 ```
+
+## Agent Commands
+
+```bash
+videocontent graph demo.vctx --entity ConnectionError
+videocontent entity-timeline demo.vctx ConnectionError
+videocontent plan demo.vctx "what happened after the error?"
+videocontent explain demo.vctx evt_0076
+videocontent compare a.vctx b.vctx
+videocontent collection search "OAuth login" a.vctx b.vctx
+videocontent collection entities a.vctx b.vctx
+```
+
+All support `--json`. The agent workflow is iterative: `inspect` a video, `search`
+for candidates, `explain` the evidence IDs, `entity-timeline` the names,
+`context` for the final package — never one giant request.
 
 ---
 
@@ -1175,6 +1224,32 @@ curl http://localhost:8000/v1/videos/VIDEO_ID/chapters
 curl http://localhost:8000/v1/videos/VIDEO_ID/receipt
 ```
 
+## Agent Intelligence
+
+```bash
+curl -X POST http://localhost:8000/v1/videos/VIDEO_ID/plan \
+  -H "Content-Type: application/json" \
+  -d '{"question": "what happened after the error?"}'
+curl "http://localhost:8000/v1/videos/VIDEO_ID/entity-timeline?name=ConnectionError"
+curl "http://localhost:8000/v1/videos/VIDEO_ID/evidence?ref=evt_0076&ref=ocr_0001"
+curl "http://localhost:8000/v1/videos/VIDEO_ID/explain?ref=edge_00042"
+```
+
+Collections (timestamps stay video-local):
+
+```bash
+curl -X POST http://localhost:8000/v1/collections \
+  -H "Content-Type: application/json" \
+  -d '{"video_ids": ["A", "B"]}'
+curl -X POST http://localhost:8000/v1/collections/COLLECTION_ID/search \
+  -H "Content-Type: application/json" \
+  -d '{"query": "OAuth login"}'
+curl http://localhost:8000/v1/collections/COLLECTION_ID/entities
+curl -X POST http://localhost:8000/v1/collections/compare \
+  -H "Content-Type: application/json" \
+  -d '{"video_a": "A", "video_b": "B"}'
+```
+
 ---
 
 # MCP Server
@@ -1237,6 +1312,9 @@ find_event
 find_object
 
 get_entities
+get_entity_timeline
+get_events
+get_evidence
 find_changes
 get_chapters
 
@@ -1245,6 +1323,15 @@ get_frame
 get_timeline
 
 ask_video
+get_context
+explain_evidence
+explain_relation
+find_before
+find_after
+compare_videos
+
+register_collection
+search_collection
 ```
 
 ---
@@ -1419,6 +1506,39 @@ Extractive chapters (titles are derived keywords, ranges are factual).
 ```json
 {
   "video_id": "VIDEO_ID"
+}
+```
+
+---
+
+## Agent iteration tools
+
+Designed for inspect → search → inspect evidence → refine → context:
+
+| Tool | Purpose |
+|------|---------|
+| `get_entity_timeline` | Every occurrence of an entity in time order |
+| `get_events` | Events in a range, optionally by type |
+| `get_evidence` | Exact facts behind reference IDs |
+| `get_context` | Budgeted package, Markdown or JSON |
+| `explain_evidence` | Supporting evidence for a node/fact |
+| `explain_relation` | Construction rule behind an edge |
+| `find_before` / `find_after` | Temporal lookup around an anchor |
+| `compare_videos` | Added/removed/changed/uncertain |
+| `register_collection` + `search_collection` | Multi-video search with video IDs |
+
+```json
+{
+  "video_id": "VIDEO_ID",
+  "entity": "ConnectionError"
+}
+```
+
+```json
+{
+  "collection_id": "COLLECTION_ID",
+  "query": "OAuth login",
+  "top_k": 10
 }
 ```
 

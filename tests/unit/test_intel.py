@@ -118,7 +118,11 @@ class TestCollection:
         assert cmp.coverage_a["transcript"] == 1
         d = cmp.to_dict()
         assert set(d) == {"video_a", "video_b", "shared_entities", "unique_a", "unique_b",
-                          "events_a", "events_b", "coverage_a", "coverage_b"}
+                          "events_a", "events_b", "coverage_a", "coverage_b",
+                          "added", "removed", "changed", "unchanged", "uncertain",
+                          "structure_a", "structure_b"}
+        assert set(cmp.added) == set(cmp.unique_b)
+        assert set(cmp.removed) == set(cmp.unique_a)
 
 
 class TestPlans:

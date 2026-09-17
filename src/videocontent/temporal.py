@@ -166,6 +166,8 @@ class Change:
 
     ``before``/``after`` are truncated quotes of the underlying facts, and
     ``evidence_ids`` name the facts — a change with no evidence is not emitted.
+    ``observed`` distinguishes measured turnover (scene/OCR/speech signals) from
+    semantically inferred change; this detector only emits observed change.
     """
 
     id: str
@@ -174,6 +176,9 @@ class Change:
     before: str
     after: str
     evidence_ids: tuple[str, ...] = ()
+    method: str = "signal_turnover"
+    observed: bool = True
+    confidence: float | None = None
 
     @property
     def timecode(self) -> str:
@@ -188,6 +193,9 @@ class Change:
             "before": self.before,
             "after": self.after,
             "evidence_ids": list(self.evidence_ids),
+            "method": self.method,
+            "observed": self.observed,
+            "confidence": self.confidence,
         }
 
 
@@ -345,6 +353,9 @@ class UIState:
     end: float
     elements: tuple[str, ...] = ()
     evidence_ids: tuple[str, ...] = ()
+    layout_signature: str = ""
+    app_hint: str | None = None
+    app_hint_confidence: float | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -352,7 +363,53 @@ class UIState:
             "timecode": f"{format_timecode(self.start)} → {format_timecode(self.end)}",
             "elements": list(self.elements),
             "evidence_ids": list(self.evidence_ids),
+            "layout_signature": self.layout_signature,
+            "app_hint": self.app_hint,
+            "app_hint_confidence": self.app_hint_confidence,
         }
+
+
+#: Observed keyword → inferred application. Hints only: confidence 0.5, always marked.
+_APP_HINTS: tuple[tuple[str, str], ...] = (
+    ("browser", "chrome|firefox|safari|edge|address bar|tab|bookmark|url"),
+    ("vscode", "vs code|vscode|explorer pane|extensions pane|terminal panel"),
+    ("terminal", "terminal|shell|bash|zsh|command prompt|powershell"),
+    ("editor", "editor|unsaved|untitled-"),
+    ("dashboard", "dashboard|sidebar|widget|metrics overview"),
+    ("email", "inbox|compose|subject:|from:"),
+    ("video_call", "mute|unmute|share screen|participants|leave meeting"),
+)
+
+
+def _app_hint(elements: tuple[str, ...]) -> tuple[str | None, float | None]:
+    blob = " ".join(elements).lower()
+    for app, pattern in _APP_HINTS:
+        if re.search(pattern, blob):
+            return app, 0.5
+    return None, None
+
+
+def _layout_signature(active: list[Any]) -> str:
+    """Coarse observed layout: element count + text-position buckets.
+
+    Uses OCR bboxes when present (3×3 grid cells), else text-length buckets.
+    Two screens with the same signature merely look alike — it is a grouping
+    key, not an identity.
+    """
+    cells: list[str] = []
+    for item in active:
+        bbox = getattr(item, "bbox_normalized", None) or getattr(item, "bbox", None)
+        if bbox and len(bbox) == 4:
+            try:
+                x = (bbox[0] + bbox[2]) / 2
+                y = (bbox[1] + bbox[3]) / 2
+                scale = 1.0 if max(bbox) <= 1.5 else 1000.0
+                cells.append(f"{min(2, int(x / scale * 3))}{min(2, int(y / scale * 3))}")
+                continue
+            except (TypeError, ZeroDivisionError):
+                pass
+        cells.append(f"L{min(9, len(getattr(item, 'text', '')) // 20)}")
+    return f"{len(active)}:" + ",".join(sorted(cells))
 
 
 def ui_states(doc: Any, *, min_state_s: float = 2.0) -> list[UIState]:
@@ -379,24 +436,150 @@ def ui_states(doc: Any, *, min_state_s: float = 2.0) -> list[UIState]:
         if not active:
             continue
         active_ids = tuple(o.id for o in active)
+        elements = tuple(_clip(o.text, 80) for o in active)
+        signature = _layout_signature(active)
+        hint, hint_conf = _app_hint(elements)
         if states and states[-1].evidence_ids == active_ids \
                 and abs(states[-1].end - a) <= _EPS:
             prev = states.pop()
-            states.append(UIState(prev.id, prev.start, b, prev.elements, prev.evidence_ids))
+            states.append(UIState(prev.id, prev.start, b, prev.elements, prev.evidence_ids,
+                                  prev.layout_signature, prev.app_hint,
+                                  prev.app_hint_confidence))
         else:
             states.append(UIState(
-                f"state_{len(states):04d}", a, b,
-                tuple(_clip(o.text, 80) for o in active), active_ids))
+                f"state_{len(states):04d}", a, b, elements, active_ids,
+                signature, hint, hint_conf))
     # Fold runt states into their predecessor (a flicker is not a state).
     folded: list[UIState] = []
     for state in states:
         if folded and state.end - state.start < min_state_s:
             prev = folded.pop()
             folded.append(UIState(prev.id, prev.start, state.end, prev.elements,
-                                  prev.evidence_ids + state.evidence_ids))
+                                  prev.evidence_ids + state.evidence_ids,
+                                  prev.layout_signature, prev.app_hint,
+                                  prev.app_hint_confidence))
         else:
             folded.append(state)
     return folded
+
+
+def ui_timeline(doc: Any, **kw: Any) -> list[dict[str, Any]]:
+    """UI states interleaved with change markers, in time order.
+
+    Each entry is ``{"ts", "kind" ("state"|"change"), "label", "ref"}`` — the
+    screen-recording storyline: what screen persisted, and what broke it.
+    """
+    entries: list[dict[str, Any]] = [
+        {"ts": state.start, "kind": "state",
+         "label": " + ".join(state.elements[:2]) or state.id, "ref": state.id}
+        for state in ui_states(doc, **kw)
+    ]
+    entries.extend(
+        {"ts": change.ts, "kind": "change",
+         "label": f"{change.change_type}", "ref": change.id}
+        for change in detect_changes(doc)
+    )
+    return sorted(entries, key=lambda entry: (entry["ts"], entry["kind"]))
+
+
+# ---------------------------------------------------------------------------
+# event chains and change chains — temporal sequences, never causal claims
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class EventChain:
+    """Consecutive events in timestamp order, labeled TEMPORAL_SEQUENCE.
+
+    Adjacency in time is not causation: the chain says B followed A, never that
+    A caused B.
+    """
+
+    id: str
+    events: tuple[Any, ...]
+    gaps_s: tuple[float, ...] = ()
+    method: str = "temporal_adjacency"
+
+    @property
+    def start(self) -> float | None:
+        return self.events[0].start if self.events else None
+
+    @property
+    def end(self) -> float | None:
+        return self.events[-1].end if self.events else None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "method": self.method,
+            "sequence": "TEMPORAL_SEQUENCE",
+            "events": [e.id for e in self.events],
+            "gaps_s": list(self.gaps_s),
+            "start": self.start, "end": self.end,
+        }
+
+
+def event_chains(doc: Any, *, max_gap_s: float = 120.0) -> list[EventChain]:
+    """Split time-ordered events into chains, breaking on gaps over ``max_gap_s``.
+
+    Only chains of ≥2 events are returned — an isolated event is a fact, not a
+    sequence, and callers should read it from the event list itself.
+    """
+    ordered = sorted(getattr(doc, "events", []), key=lambda e: (e.start, e.end, e.id))
+    chains: list[EventChain] = []
+    current: list[Any] = []
+    gaps: list[float] = []
+    for event in ordered:
+        if current and event.start - current[-1].end > max_gap_s:
+            if len(current) >= 2:
+                chains.append(EventChain(f"chain_{len(chains):04d}", tuple(current),
+                                         tuple(gaps)))
+            current, gaps = [], []
+        if current:
+            gaps.append(round(event.start - current[-1].end, 3))
+        current.append(event)
+    if len(current) >= 2:
+        chains.append(EventChain(f"chain_{len(chains):04d}", tuple(current), tuple(gaps)))
+    return chains
+
+
+@dataclass(frozen=True)
+class ChangeChain:
+    """state_t0 → change → state_t1 linked by temporal adjacency.
+
+    ``observed`` is True only when both states were observed and the change was
+    measured (the only kind this detector emits); the *link* itself is structural
+    adjacency, recorded in ``method``.
+    """
+
+    id: str
+    before_state: UIState | None
+    change: Change
+    after_state: UIState | None
+    method: str = "temporal_adjacency"
+    observed: bool = True
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id, "method": self.method, "observed": self.observed,
+            "before_state": self.before_state.id if self.before_state else None,
+            "change": self.change.to_dict(),
+            "after_state": self.after_state.id if self.after_state else None,
+        }
+
+
+def change_chains(doc: Any, *, tolerance_s: float = 2.0, **kw: Any) -> list[ChangeChain]:
+    """Attach each detected change to the UI states it sits between."""
+    states = ui_states(doc, **kw)
+    chains: list[ChangeChain] = []
+    for index, change in enumerate(detect_changes(doc)):
+        # A change inside one stable state (e.g. speech turnover) keeps that
+        # state on both sides rather than inventing a transition.
+        before = next((s for s in reversed(states)
+                       if s.end <= change.ts + tolerance_s and s.start <= change.ts), None)
+        after = next((s for s in states
+                      if s.start >= change.ts - tolerance_s and s.end >= change.ts), None)
+        chains.append(ChangeChain(f"cchain_{index:04d}", before, change, after))
+    return chains
 
 
 # ---------------------------------------------------------------------------
@@ -414,17 +597,24 @@ class TemporalQuery:
     start: float | None = None
     end: float | None = None
     first_only: bool = False
+    last_only: bool = False
+    anchor_b: str | None = None
+    max_gap_s: float | None = None
+    radius_s: float = 5.0
 
     @property
     def is_temporal(self) -> bool:
         return self.relation is not None or self.start is not None \
-            or self.end is not None or self.first_only
+            or self.end is not None or self.first_only or self.last_only \
+            or self.anchor_b is not None
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "raw": self.raw, "anchor": self.anchor,
             "relation": self.relation.value if self.relation else None,
             "start": self.start, "end": self.end, "first_only": self.first_only,
+            "last_only": self.last_only, "anchor_b": self.anchor_b,
+            "max_gap_s": self.max_gap_s, "radius_s": self.radius_s,
         }
 
 
@@ -434,12 +624,22 @@ _BETWEEN_RE = re.compile(
     rf"\bbetween\s+({_TIMECODE})\s+and\s+({_TIMECODE})", re.IGNORECASE)
 _BEFORE_RE = re.compile(
     r"(?:^|\b)(?:what happened|what was|show me|find)\s+"
-    r"(?:just\s+)?before\s+(.+?)\??$", re.IGNORECASE)
+    r"(?:(?:just|immediately|right|shortly)\s+)?before\s+(.+?)\??$", re.IGNORECASE)
 _AFTER_RE = re.compile(
     r"(?:^|\b)(?:what happened|what was|show me|find)\s+"
-    r"(?:just\s+)?after\s+(.+?)\??$", re.IGNORECASE)
+    r"(?:(?:just|immediately|right|shortly)\s+)?after\s+(.+?)\??$", re.IGNORECASE)
 _WHILE_RE = re.compile(r"\bwhile\s+(.+?)\??$", re.IGNORECASE)
+_DURING_RE = re.compile(r"\bduring\s+(.+?)\??$", re.IGNORECASE)
+_AROUND_RE = re.compile(r"\baround\s+(.+?)\??$", re.IGNORECASE)
 _FIRST_RE = re.compile(r"\bfirst\b", re.IGNORECASE)
+_LAST_RE = re.compile(r"\b(last|final|most recent|disappeared|disappear)\b", re.IGNORECASE)
+_GAP_WORDS = (
+    (re.compile(r"\bimmediately\b|\bright\s+(after|before)\b", re.IGNORECASE), 10.0),
+    (re.compile(r"\bshortly\b", re.IGNORECASE), 30.0),
+)
+_BETWEEN_ANCHORS_RE = re.compile(r"\bbetween\s+(.+?)\s+and\s+(.+?)\??$", re.IGNORECASE)
+_FROM_TO_RE = re.compile(
+    rf"\bfrom\s+({_TIMECODE})\s+to\s+({_TIMECODE})", re.IGNORECASE)
 _QUESTION_LEAD_RE = re.compile(
     r"^(when did|where was|what was|which|who|show me|find|tell me)\b\s*", re.IGNORECASE)
 
@@ -448,6 +648,14 @@ def _tc_to_seconds(text: str) -> float:
     from .timecode import parse_timecode
 
     return parse_timecode(text)
+
+
+def _gap_hint(raw: str) -> float | None:
+    """'immediately after' → 10 s, 'shortly before' → 30 s, else None."""
+    for pattern, seconds in _GAP_WORDS:
+        if pattern.search(raw):
+            return seconds
+    return None
 
 
 def parse_temporal_query(query: str) -> TemporalQuery:
@@ -461,7 +669,6 @@ def parse_temporal_query(query: str) -> TemporalQuery:
     start: float | None = None
     end: float | None = None
     relation: TemporalRelation | None = None
-    first_only = False
 
     between = _BETWEEN_RE.search(raw)
     if between:
@@ -472,27 +679,61 @@ def parse_temporal_query(query: str) -> TemporalQuery:
         if start is not None and end is not None and end > start:
             anchor = (raw[:between.start()] + raw[between.end():]).strip(" ?,-")
             anchor = re.sub(r"(?i)\b(what changed|what happened)\b", "", anchor).strip(" ?,-")
-            return TemporalQuery(raw, anchor or raw, None, start, end, False)
+            return TemporalQuery(raw, anchor or raw, None, start, end)
+
+    from_to = _FROM_TO_RE.search(raw)
+    if from_to:
+        try:
+            start, end = _tc_to_seconds(from_to.group(1)), _tc_to_seconds(from_to.group(2))
+        except ValueError:
+            start = end = None
+        if start is not None and end is not None and end > start:
+            anchor = (raw[:from_to.start()] + raw[from_to.end():]).strip(" ?,-")
+            return TemporalQuery(raw, anchor or raw, None, start, end)
+
+    between_anchors = _BETWEEN_ANCHORS_RE.search(raw)
+    if between_anchors and not _TC_RE.search(raw):
+        # "what happened between the login and the error": two text anchors.
+        return TemporalQuery(raw, between_anchors.group(1).strip(" ?"),
+                             None, None, None, False, False,
+                             between_anchors.group(2).strip(" ?"))
 
     before = _BEFORE_RE.search(raw)
     if before:
         return TemporalQuery(raw, before.group(1).strip(" ?"), TemporalRelation.BEFORE,
-                             None, None, False)
+                             None, None, False, False, None, _gap_hint(raw))
     after = _AFTER_RE.search(raw)
     if after:
         return TemporalQuery(raw, after.group(1).strip(" ?"), TemporalRelation.AFTER,
-                             None, None, False)
+                             None, None, False, False, None, _gap_hint(raw))
     while_m = _WHILE_RE.search(raw)
     if while_m and len(raw.split()) > 3:
         anchor_text = while_m.group(1).strip(" ?")
         head = raw[:while_m.start()].strip()
         return TemporalQuery(raw, f"{head} {anchor_text}".strip(),
-                             TemporalRelation.CO_OCCURS, None, None, False)
+                             TemporalRelation.CO_OCCURS)
+    during_m = _DURING_RE.search(raw)
+    if during_m and len(raw.split()) > 2:
+        anchor_text = during_m.group(1).strip(" ?")
+        head = raw[:during_m.start()].strip()
+        return TemporalQuery(raw, f"{head} {anchor_text}".strip() or anchor_text,
+                             TemporalRelation.DURING)
+    around_m = _AROUND_RE.search(raw)
+    if around_m and not _TC_RE.search(raw) and len(raw.split()) > 2:
+        return TemporalQuery(raw, around_m.group(1).strip(" ?"),
+                             TemporalRelation.CO_OCCURS, None, None,
+                             False, False, None, None, 30.0)
     if _FIRST_RE.search(raw):
         cleaned = _FIRST_RE.sub("", raw)
         cleaned = _QUESTION_LEAD_RE.sub("", cleaned).strip()
         cleaned = re.sub(r"\s+", " ", cleaned).strip(" ?")
         return TemporalQuery(raw, cleaned or raw, None, None, None, True)
+    if _LAST_RE.search(raw):
+        cleaned = _LAST_RE.sub("", raw)
+        cleaned = _QUESTION_LEAD_RE.sub("", cleaned).strip()
+        cleaned = re.sub(r"(?i)\b(occurrence|appearance|mention|time)\b", "", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip(" ?")
+        return TemporalQuery(raw, cleaned or raw, None, None, None, False, True)
 
     # Bare timecodes constrain the range ("pricing at 12:20", "12:20-13:10").
     tcs = [m.group(0) for m in _TC_RE.finditer(raw)]
@@ -504,25 +745,30 @@ def parse_temporal_query(query: str) -> TemporalQuery:
         if secs:
             anchor = _TC_RE.sub("", raw).strip(" ?,-")
             if len(secs) >= 2:
-                return TemporalQuery(raw, anchor or raw, None, secs[0], secs[-1], False)
+                return TemporalQuery(raw, anchor or raw, None, secs[0], secs[-1])
             return TemporalQuery(raw, anchor or raw, None, max(0.0, secs[0] - 30.0),
-                                 secs[0] + 30.0, False)
-    return TemporalQuery(raw, anchor, relation, start, end, first_only)
+                                 secs[0] + 30.0)
+    return TemporalQuery(raw, anchor, relation, start, end)
 
 
 __all__ = [
     "Change",
+    "ChangeChain",
     "Chapter",
+    "EventChain",
     "TemporalQuery",
     "TemporalRelation",
     "TemporalWindow",
     "UIState",
     "build_chapters",
+    "change_chains",
     "detect_changes",
+    "event_chains",
     "merge_windows",
     "parse_temporal_query",
     "relate",
     "ui_states",
+    "ui_timeline",
     "window_around",
     "window_at",
 ]

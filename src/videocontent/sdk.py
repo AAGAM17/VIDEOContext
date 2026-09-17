@@ -45,6 +45,48 @@ log = get_logger("sdk")
 
 
 @dataclass(frozen=True)
+class AnswerTrace:
+    """The full path from question to answer — debugging, research, benchmarking.
+
+    ``selected_spans``/``omitted_spans`` name reference IDs (small); the spans
+    themselves travel on the Answer. ``answer_support`` names the evidence IDs
+    the answer text was built from (here: all selected evidence — the LLM cites
+    by number, and fabrication beyond the evidence is a prompt violation, not data).
+    """
+
+    query: str
+    plan: dict[str, Any] = field(default_factory=dict)
+    retrieved_evidence: int = 0
+    graph_operations: tuple[str, ...] = ()
+    temporal_operations: tuple[str, ...] = ()
+    selected_spans: tuple[str, ...] = ()
+    omitted_spans: tuple[str, ...] = ()
+    budget: dict[str, Any] = field(default_factory=dict)
+    coverage: dict[str, Any] = field(default_factory=dict)
+    answer_support: tuple[str, ...] = ()
+    llm: dict[str, Any] = field(default_factory=dict)
+    outcome: str = "unknown"
+    warnings: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "query": self.query,
+            "plan": self.plan,
+            "retrieved_evidence": self.retrieved_evidence,
+            "graph_operations": list(self.graph_operations),
+            "temporal_operations": list(self.temporal_operations),
+            "selected_spans": list(self.selected_spans),
+            "omitted_spans": list(self.omitted_spans),
+            "budget": self.budget,
+            "coverage": self.coverage,
+            "answer_support": list(self.answer_support),
+            "llm": self.llm,
+            "outcome": self.outcome,
+            "warnings": list(self.warnings),
+        }
+
+
+@dataclass(frozen=True)
 class Answer:
     """An answer to a question about a video, with traceable evidence."""
 
@@ -136,6 +178,10 @@ class Video:
         self.config: ProcessingConfig = config or ProcessingConfig()
         self._doc: VideoContextDocument | None = None
         self._retriever: Retriever | None = None
+        self._graph: Any = None
+        self._graph_for: Any = None
+        self._entities: Any = None
+        self._entities_for: Any = None
         self.path: Path | None = None
         """Where the document was loaded from or last saved to, if anywhere."""
         if isinstance(source, _Asset):
@@ -242,6 +288,8 @@ class Video:
 
         self._doc = Pipeline(self.config).run(self._asset or self.source_ref)
         self._retriever = None
+        self._graph = None
+        self._entities = None
         return self._doc
 
     # -- persistence -------------------------------------------------------
@@ -292,13 +340,94 @@ class Video:
         """Timestamp-grounded entities with cross-modal links and uncertainty flags."""
         from .entities import extract_entities
 
-        return extract_entities(self.document)
+        if self._entities is None or self._entities_for is not self._doc:
+            self._entities = extract_entities(self.document)
+            self._entities_for = self._doc
+        return self._entities
+
+    def entity_timeline(self, name: str) -> Any:
+        """All occurrences of ``name`` in time order, plus neighborhood helpers.
+
+        Exact normalized match first, then the highest-confidence entity whose
+        name contains the query (or vice versa) — so ``ConnectionError`` finds
+        ``E ConnectionError: refused …`` without merging distinct entities.
+        """
+        from .entities import EntityTimeline, normalize_name
+
+        key = normalize_name(name)
+        entities = self.entities()
+        for entity in entities:
+            if normalize_name(entity.name) == key:
+                return EntityTimeline(entity)
+        fallbacks = sorted(
+            (entity for entity in entities
+             if key and (key in normalize_name(entity.name)
+                         or normalize_name(entity.name) in key)),
+            key=lambda entity: (-entity.confidence, entity.first_seen or 0.0))
+        return EntityTimeline(fallbacks[0]) if fallbacks else None
 
     def changes(self) -> list[Any]:
         """Cheap change detection between adjacent regions, evidence-backed."""
         from .temporal import detect_changes
 
         return detect_changes(self.document)
+
+    def graph(self) -> Any:
+        """The derived evidence graph (memoized per document)."""
+        from .graph import build_graph
+
+        if self._graph is None or self._graph_for is not self._doc:
+            self._graph = build_graph(self.document)
+            self._graph_for = self._doc
+        return self._graph
+
+    def query_plan(self, question: str) -> dict[str, Any]:
+        """Inspectable plan for one question: intent, entities, strategy, coverage."""
+        from .queryplan import build_plan
+
+        return build_plan(question, doc=self.document).to_dict()
+
+    def explain(self, node_or_edge_id: str) -> dict[str, Any] | None:
+        """Explain a graph node (supporting evidence) or edge (construction rule)."""
+        graph = self.graph()
+        if node_or_edge_id in graph.edges:
+            return graph.explain(node_or_edge_id)
+        node = graph.get_node(node_or_edge_id)
+        if node is None:
+            return None
+        return {
+            "node": node.to_dict(),
+            "supporting_evidence": [n.to_dict()
+                                    for n in graph.supporting_evidence(node_or_edge_id)],
+            "neighbors": [{"node": n.to_dict(), "edge": e.to_dict()}
+                          for n, e in graph.neighbors(node_or_edge_id)[:20]],
+        }
+
+    def context_package(self, task: str, **kw: Any) -> Any:
+        """First-class agent context package: planned, optimized, budgeted."""
+        from .packages import build_package
+        from .queryplan import build_plan
+
+        if not self.processed:
+            raise NotProcessedError(
+                f"{self.source.name} has not been processed",
+                hint="call video.process() first",
+            )
+        plan = build_plan(task, doc=self.document)
+        selection = self.context(task, **kw)
+        graph = self.graph()
+        entities = [e.to_dict() for e in self.entities()
+                    if any(o.ref_id in {r for s in selection.evidence for r in s.ref_ids}
+                           for o in e.occurrences)][:20]
+        return build_package(
+            self.document, task, list(selection.evidence),
+            plan=plan.to_dict(), intent=plan.intent.value,
+            frames=list(selection.frames), entities=entities,
+            graph_summary=graph.stats(),
+            budget={"max_tokens": kw.get("max_tokens", 4000),
+                    "notes": selection.budget_notes},
+            warnings=[*plan.warnings],
+            max_spans=kw.get("max_spans"), max_frames=kw.get("max_frames"))
 
     def plan(self, task: str) -> dict[str, Any]:
         """What would ``task`` need? Returns plan + coverage against this document."""
@@ -313,9 +442,26 @@ class Video:
         return {"plan": plan.to_dict(), "coverage": check_coverage(self.document, plan).to_dict()}
 
     def receipt(self) -> dict[str, Any]:
-        """Processing receipt: how this context was generated, from the artifact itself."""
+        """Processing receipt: how this context was generated, from the artifact itself.
+
+        Tells downstream intelligence which modalities exist or are missing, which
+        stages ran (and where — local vs remote), which timestamps are
+        trustworthy, and which costs were measured. Nothing is invented: absent
+        data reads as absent.
+        """
         doc = self.document
         source = getattr(doc, "source", None)
+        modalities = {
+            "transcript": len(doc.transcript), "ocr": len(doc.ocr),
+            "vision": len(doc.vision), "events": len(doc.events),
+            "scenes": len(doc.scenes), "segments": len(doc.segments),
+            "frames": len(doc.frames), "objects": len(getattr(doc, "objects", [])),
+        }
+        trust = {stage.name: {"status": stage.status.value
+                              if hasattr(stage.status, "value") else stage.status,
+                              "provider": stage.provider, "remote": stage.remote,
+                              "error": stage.error}
+                 for stage in doc.stages}
         return {
             "video_id": doc.id,
             "vctx_version": doc.vctx_version,
@@ -323,11 +469,14 @@ class Video:
             "source": source.model_dump(mode="json") if source is not None else None,
             "stages": [s.model_dump(mode="json") for s in doc.stages],
             "metrics": doc.metrics.model_dump(mode="json"),
-            "modalities": {
-                "transcript": len(doc.transcript), "ocr": len(doc.ocr),
-                "vision": len(doc.vision), "events": len(doc.events),
-                "scenes": len(doc.scenes), "segments": len(doc.segments),
-                "frames": len(doc.frames),
+            "modalities": modalities,
+            "missing_modalities": sorted(mod for mod, count in modalities.items()
+                                         if count == 0),
+            "trust": trust,
+            "timestamps_trustworthy": bool(doc.segments) or bool(doc.scenes),
+            "derived_available": {
+                "entities": True, "chapters": True, "changes": True,
+                "states": bool(doc.ocr),
             },
         }
 
@@ -341,16 +490,16 @@ class Video:
         top_k: int = 5,
         min_score: float | None = None,
     ) -> "Answer":
-        """Answer a question using retrieved evidence + an LLM.
+        """Answer a question using planned, graph-aware retrieval + an LLM.
 
-        The pipeline: query plan → retrieval → evidence → context → LLM → answer.
-        Temporal questions ("before the error", "when did X first appear") are
-        planned explicitly; the plan is always in ``answer.trace``. Every answer
-        carries its evidence spans so the caller can verify timestamps.
+        Pipeline: QueryPlan → coverage check → graph-aware retrieval → evidence
+        selection → ContextPackage → LLM → Answer + AnswerTrace. If the plan needs
+        modalities the document lacks, the answer says so (with a reprocessing
+        suggestion) instead of failing silently — and nothing is ever processed
+        implicitly to fill the gap.
         """
         from .llm import NullLLM, OpenAILLM
-        from .retrieval.query import SearchResult
-        from .temporal import parse_temporal_query
+        from .queryplan import build_plan
 
         if not self.processed:
             raise NotProcessedError(
@@ -358,38 +507,60 @@ class Video:
                 hint="call video.process() first",
             )
 
-        plan = parse_temporal_query(question)
-        trace: dict[str, Any] = {"query_plan": plan.to_dict()}
-        # Temporal questions execute through the temporal planner; everything else
-        # uses ranked search. Either way the trace says which ran.
-        if plan.is_temporal:
-            _, search_result = self.retriever.query_temporal(
-                question, modalities=modalities, top_k=top_k)
-            trace["executor"] = "temporal"
-        else:
-            search_result = self.search(
-                question, modalities=modalities, top_k=top_k, min_score=min_score)
-            trace["executor"] = "search"
-        trace["retrieval"] = {
-            "spans": len(search_result.spans), "total": search_result.total,
-            "modalities": list(search_result.modalities),
-            "notes": list(search_result.notes),
-        }
+        plan = build_plan(question, doc=self.document)
+        budget = {"top_k": top_k, "modalities": modalities, "min_score": min_score}
+        warnings: list[str] = list(plan.warnings)
+        outcome_hint = ""
+        if plan.coverage.get("missing") and plan.intent.value not in (
+                "fact_lookup", "general_summary"):
+            # Coverage-aware planning: attempt retrieval anyway (partial evidence
+            # may suffice), but name the gap and how to fill it. Never process
+            # implicitly to fill it.
+            outcome_hint = "insufficient_coverage"
+            warnings.append("missing modalities: "
+                            + ", ".join(f"{mod} ({hint})" for mod, hint in zip(
+                                plan.coverage["missing"],
+                                plan.coverage.get("suggestions", []))))
 
-        if not search_result:
-            trace["outcome"] = "insufficient_evidence"
-            return Answer(
-                question=question,
-                answer="I couldn't find any relevant information in the video to answer this question.",
-                confidence=0.0,
-                evidence=[],
-                spans=[],
-                trace=trace,
-            )
+        search_result, explanation = self.retriever.search_graph(
+            question, modalities=modalities, top_k=top_k, graph=self.graph())
+        selected = list(search_result.spans)
+        if min_score is not None:
+            selected = [s for s in selected if s.score >= min_score]
+
+        def _trace(outcome: str, llm: dict[str, Any]) -> dict[str, Any]:
+            return AnswerTrace(
+                query=question, plan=plan.to_dict(),
+                retrieved_evidence=search_result.total,
+                graph_operations=tuple(
+                    f"{e['relation']}:{e['from']}→{e['to']}"
+                    for e in explanation.graph_expansions),
+                temporal_operations=tuple(explanation.temporal_operations),
+                selected_spans=tuple(ref for span in selected for ref in span.ref_ids),
+                omitted_spans=tuple(o["ref_ids"][0] if o["ref_ids"] else "?"
+                                      for o in explanation.omitted),
+                budget=budget, coverage=plan.coverage,
+                answer_support=tuple(ref for span in selected for ref in span.ref_ids),
+                llm=llm, outcome=outcome, warnings=tuple(warnings)).to_dict()
+
+        if not selected:
+            outcome = outcome_hint or "insufficient_evidence"
+            if outcome_hint:
+                answer_text = ("I couldn't answer from this video: it lacks "
+                               f"{', '.join(plan.coverage['missing'])}. "
+                               + " ".join(plan.coverage.get("suggestions", [])))
+            elif min_score is not None:
+                answer_text = ("Retrieved evidence did not meet the minimum score — "
+                               "the video may not contain an answer.")
+            else:
+                answer_text = ("I couldn't find any relevant information in the video "
+                               "to answer this question.")
+            return Answer(question=question, answer=answer_text, confidence=0.0,
+                          evidence=[], spans=[], trace=_trace(outcome, {}))
 
         # Build context from evidence
         context_parts = []
-        for i, span in enumerate(search_result.spans, 1):
+        for i, span in enumerate(selected, 1):
             context_parts.append(
                 f"[{i}] {span.timecode} ({span.modality}): {span.text[:500]}"
             )
@@ -425,30 +596,28 @@ class Video:
         except Exception as exc:
             # If LLM fails, return evidence-only answer
             log.warning("ask.llm_failed", extra={"error": str(exc)})
-            trace["outcome"] = "llm_failed"
-            trace["llm"] = {"provider": llm_provider, "error": type(exc).__name__}
             return Answer(
                 question=question,
                 answer=f"LLM unavailable ({type(exc).__name__}). Here is the relevant evidence:\n" + context,
                 confidence=0.5,
-                evidence=list(search_result.spans),
-                spans=list(search_result.spans),
-                trace=trace,
+                evidence=list(selected),
+                spans=list(selected),
+                trace=_trace("llm_failed", {"provider": llm_provider,
+                                            "error": type(exc).__name__}),
             )
 
         # Calculate confidence based on evidence quality
-        confidences = [s.confidence for s in search_result.spans if s.confidence is not None]
+        confidences = [s.confidence for s in selected if s.confidence is not None]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
 
-        trace["outcome"] = "answered"
-        trace["llm"] = {"provider": llm_provider, "model": self.config.llm.model}
         return Answer(
             question=question,
             answer=answer_text,
             confidence=min(avg_confidence, 1.0),
-            evidence=list(search_result.spans),
-            spans=list(search_result.spans),
-            trace=trace,
+            evidence=list(selected),
+            spans=list(selected),
+            trace=_trace("answered", {"provider": llm_provider,
+                                      "model": self.config.llm.model}),
         )
 
     # -- Semantic Context ----------------------------------------------------

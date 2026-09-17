@@ -655,6 +655,242 @@ def context_cmd(
         console.print(render.explain_block("budget", ctx.budget_notes))
 
 
+# -- agent intelligence --------------------------------------------------------
+
+
+@app.command()
+@friendly
+def graph(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    node: str | None = typer.Option(None, "--node", "-n",
+                                    help="Show neighbors of this node ID."),
+    entity: str | None = typer.Option(None, "--entity", "-e",
+                                      help="Show occurrences of this entity name."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Show the derived evidence graph: stats, node neighbors, entity occurrences."""
+    video = _load_video(document)
+    graph = video.graph()
+    if as_json:
+        if node is not None:
+            _emit({"node": node,
+                   "neighbors": [{"node": n.to_dict(), "edge": e.to_dict()}
+                                 for n, e in graph.neighbors(node)[:30]]})
+        elif entity is not None:
+            timeline = video.entity_timeline(entity)
+            _emit({"entity": entity,
+                   "timeline": timeline.to_dict() if timeline else None})
+        else:
+            _emit({"stats": graph.stats()})
+        return
+    console.print(render.bold(f"graph: {len(graph.nodes)} nodes · {len(graph.edges)} edges"))
+    if node is not None:
+        for neighbor, edge in graph.neighbors(node)[:30]:
+            console.print(f"  {edge.relation} → {neighbor.id} ({neighbor.kind})")
+    elif entity is not None:
+        timeline = video.entity_timeline(entity)
+        if timeline is None:
+            console.print(Text(f"no entity named {entity!r}"))
+            return
+        for occurrence in timeline.occurrences:
+            console.print(f"  [{occurrence.start:.1f}] ({occurrence.modality}) "
+                          f"{occurrence.text[:100]}")
+    else:
+        for kind, count in sorted(graph.stats()["kinds"].items()):
+            console.print(f"  {kind}: {count}")
+
+
+@app.command(name="entity-timeline")
+@friendly
+def entity_timeline_cmd(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    name: str = typer.Argument(..., help="Entity name, e.g. ConnectionError."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Every occurrence of an entity in time order, with supporting evidence."""
+    video = _load_video(document)
+    timeline = video.entity_timeline(name)
+    if timeline is None:
+        if as_json:
+            _emit({"entity": name, "occurrences": []})
+            return
+        console.print(Text(f"no entity named {name!r}"))
+        return
+    if as_json:
+        _emit(timeline.to_dict())
+        return
+    console.print(render.bold(f"{timeline.entity.name} "
+                              f"[{timeline.entity.type}] x{len(timeline.occurrences)}"))
+    for occurrence in timeline.occurrences:
+        console.print(f"  [{occurrence.start:.1f}] ({occurrence.modality}) "
+                      f"{occurrence.text[:100]}")
+
+
+@app.command()
+@friendly
+def plan(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    question: str = typer.Argument(..., help="Question to plan for."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Show the inspectable query plan: intent, entities, strategy, coverage."""
+    video = _load_video(document)
+    planned = video.query_plan(question)
+    if as_json:
+        _emit(planned)
+        return
+    console.print(render.bold(f"intent: {planned['intent']}"))
+    if planned["entities"]:
+        console.print(f"entities: {', '.join(planned['entities'])}")
+    if planned["temporal"]:
+        console.print(f"temporal: {planned['temporal']}")
+    console.print("strategy:")
+    for step in planned["retrieval_strategy"]:
+        console.print(f"  • {step}")
+    if planned["coverage"].get("missing"):
+        errors.print("coverage gap: " + ", ".join(planned["coverage"]["missing"]))
+    if planned["warnings"]:
+        for warning in planned["warnings"]:
+            errors.print(f"warning: {warning}")
+
+
+@app.command()
+@friendly
+def explain(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    ref: str = typer.Argument(..., help="Node or edge ID, e.g. evt_0000 or edge_00001."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Explain a graph node (supporting evidence) or edge (construction rule)."""
+    video = _load_video(document)
+    explanation = video.explain(ref)
+    if explanation is None:
+        if as_json:
+            _emit({"ref": ref, "found": False})
+            return
+        errors.print(f"error: no node or edge {ref!r}")
+        raise typer.Exit(1)
+    if as_json:
+        _emit(explanation)
+        return
+    if "rule" in explanation:
+        console.print(render.bold(f"{explanation['relation']}: "
+                                  f"{explanation['source']} → {explanation['target']}"))
+        console.print(f"rule: {explanation['rule']}")
+        console.print(f"provenance: {', '.join(explanation['provenance'])}")
+    else:
+        node = explanation["node"]
+        console.print(render.bold(f"{node['id']} ({node['kind']}) — {node['label'][:100]}"))
+        console.print(f"supporting evidence ({len(explanation['supporting_evidence'])}):")
+        for support in explanation["supporting_evidence"][:10]:
+            console.print(f"  [{support['start']:.1f}] ({support['kind']}) "
+                          f"{support['label'][:100]}")
+
+
+@app.command()
+@friendly
+def compare(
+    first: Path = typer.Argument(
+        ..., help="First .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    second: Path = typer.Argument(
+        ..., help="Second .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Compare two videos: added/removed/changed/unchanged entities plus structure."""
+    from ..collection import compare as _compare
+    from ..sdk import load as load_video
+
+    doc_a = load_video(first, config=state.config).document
+    doc_b = load_video(second, config=state.config).document
+    result = _compare(first.stem, doc_a, second.stem, doc_b)
+    if as_json:
+        _emit(result.to_dict())
+        return
+    console.print(render.bold(f"{first.stem} vs {second.stem}"))
+    if result.added:
+        console.print(f"added in {second.stem}: {', '.join(result.added[:10])}")
+    if result.removed:
+        console.print(f"only in {first.stem}: {', '.join(result.removed[:10])}")
+    if result.changed:
+        console.print(f"changed: {', '.join(result.changed[:10])}")
+    if result.uncertain:
+        console.print(f"uncertain: {', '.join(result.uncertain[:10])}")
+    console.print(f"structure: {result.structure_a} vs {result.structure_b}")
+
+
+collection_app = typer.Typer(
+    name="collection",
+    help="Multi-video intelligence over .vctx files (never merges them).",
+    no_args_is_help=True,
+)
+app.add_typer(collection_app, name="collection")
+
+
+@collection_app.command("search")
+@friendly
+def collection_search(
+    query: str = typer.Argument(..., help="Query to run across videos."),
+    documents: list[Path] = typer.Argument(..., help="Two or more .vctx files."),
+    top_k: int = typer.Option(10, "--top-k", "-k", help="Max merged spans."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Search across videos; every span keeps its video_id provenance."""
+    from ..collection import CollectionIndex
+    from ..sdk import load as load_video
+
+    if len(documents) < 2:
+        errors.print("error: collection search needs at least two .vctx files")
+        raise typer.Exit(2)
+    docs = {}
+    for path in documents:
+        if not path.is_file():
+            errors.print(f"error: no such file: {path}")
+            raise typer.Exit(2)
+        docs[path.stem] = load_video(path, config=state.config).document
+    result = CollectionIndex(docs).search(query, top_k=top_k)
+    if as_json:
+        _emit(result.to_dict())
+        return
+    for span in result.spans:
+        console.print(f"  [{span.video_id} {span.timecode}] ({span.modality}): "
+                      f"{span.text[:120]}")
+    console.print(render.bold(f"{result.total} spans across "
+                              f"{result.videos_searched} videos"))
+
+
+@collection_app.command("entities")
+@friendly
+def collection_entities(
+    documents: list[Path] = typer.Argument(..., help="Two or more .vctx files."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Cross-video entity links; video-local evidence stays attached."""
+    from ..collection import CollectionIndex
+    from ..sdk import load as load_video
+
+    docs = {p.stem: load_video(p, config=state.config).document for p in documents
+            if p.is_file()}
+    linked = CollectionIndex(docs).link_entities()
+    if as_json:
+        _emit({"links": linked})
+        return
+    shared = {name: entries for name, entries in linked.items() if len(entries) > 1}
+    console.print(render.bold(f"{len(linked)} distinct entities, "
+                              f"{len(shared)} shared across videos"))
+    for name, entries in sorted(shared.items())[:20]:
+        console.print(f"  {name}: {', '.join(e['video_id'] for e in entries)}")
+
+
 # -- source ----------------------------------------------------------------
 
 

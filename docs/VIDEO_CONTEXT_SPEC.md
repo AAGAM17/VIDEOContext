@@ -386,11 +386,21 @@ A document is **valid** iff:
 
 ## 16.1 Derived views (informative, not stored)
 
-Chapters, entities, changes, UI states, timelines, and context packages are
-**computed from a valid document, not stored in it**. This keeps the format stable
-while the intelligence layer evolves, and every derived object inherits the rules
-above: timestamps copied from stored facts, IDs referenceable, derived titles and
-labels always flagged (`inferred: true`, `ambiguous`, "derived" markings).
+Chapters, entities, changes, UI states, timelines, event/change chains, evidence
+graphs, query plans, and context packages are **computed from a valid document,
+not stored in it**. This keeps the format stable while the intelligence layer
+evolves, and every derived object inherits the rules above: timestamps copied
+from stored facts, IDs referenceable, derived titles and labels always flagged
+(`inferred: true`, `ambiguous`, "derived" markings).
+
+Three levels, in increasing distance from bytes:
+
+- **Stored facts** (this spec): transcript, OCR, vision, objects, events, scenes,
+  segments, frames, stages, metrics, source.
+- **Derived views**: graph nodes/edges (rule-cited), entity timelines, chapters,
+  changes, chains, receipts. Deterministic per document.
+- **Query-time intelligence**: plans, ranked/expanded spans, packages, answers +
+  traces. Bounded by budgets; never persisted unless the caller saves them.
 
 ---
 

@@ -19,7 +19,8 @@ def seed_doc() -> VideoContextDocument:
     return VideoContextDocument(
         id="vid_api",
         video=VideoInfo(id="vid_api", filename="a.mp4", duration=100.0, has_audio=True),
-        transcript=[Utterance(id="utt_0000", text="the checkout failed", start=50.0, end=56.0)],
+        transcript=[Utterance(id="utt_0000", text="the checkout failed", start=50.0, end=56.0),
+                    Utterance(id="utt_0001", text="Error dialogue shown", start=52.0, end=58.0)],
         ocr=[OCRText(id="ocr_0000", text="Error Payment declined", start=50.0, end=70.0,
                      first_frame_ts=50.0, last_frame_ts=70.0, stable=True, frame_count=4)],
     )
@@ -84,3 +85,66 @@ class TestIntelEndpoints:
 
     def test_unknown_video(self, client):
         assert client.get("/v1/videos/nope/entities").status_code == 404
+
+
+class TestAgentEndpoints:
+    def test_graph(self, client):
+        body = client.get("/v1/videos/test-api/graph").json()
+        assert body["nodes"] > 0 and body["edges"] >= 0
+
+    def test_plan(self, client):
+        body = client.post("/v1/videos/test-api/plan",
+                           json={"question": "what happened before the error?"}).json()
+        assert body["intent"] == "temporal_before"
+        assert body["retrieval_strategy"]
+
+    def test_entity_timeline(self, client):
+        response = client.get("/v1/videos/test-api/entity-timeline",
+                              params={"name": "Error"})
+        assert response.status_code == 200
+        assert response.json()["count"] >= 1
+
+    def test_entity_timeline_missing(self, client):
+        response = client.get("/v1/videos/test-api/entity-timeline",
+                              params={"name": "Zebra"})
+        assert response.status_code == 404
+
+    def test_evidence(self, client):
+        body = client.get("/v1/videos/test-api/evidence",
+                          params=[("ref", "ocr_0000"), ("ref", "nope")]).json()
+        assert [item["id"] for item in body] == ["ocr_0000"]
+
+    def test_explain(self, client):
+        assert client.get("/v1/videos/test-api/explain",
+                          params={"ref": "ocr_0000"}).json()["node"]["id"] == "ocr_0000"
+        assert client.get("/v1/videos/test-api/explain",
+                          params={"ref": "nope"}).status_code == 404
+
+    def test_collections(self, client):
+        import apps.api.main as api
+
+        api.video_docs["second"] = seed_doc()
+        try:
+            created = client.post("/v1/collections",
+                                  json={"video_ids": ["test-api", "second"]})
+            assert created.status_code == 201
+            cid = created.json()["collection_id"]
+            found = client.post(f"/v1/collections/{cid}/search",
+                                json={"query": "checkout"}).json()
+            assert found["videos_searched"] == 2
+            links = client.get(f"/v1/collections/{cid}/entities").json()
+            assert "links" in links
+            compared = client.post("/v1/collections/compare",
+                                   json={"video_a": "test-api",
+                                         "video_b": "second"}).json()
+            assert compared["video_a"] == "test-api"
+        finally:
+            api.video_docs.pop("second", None)
+
+    def test_collection_validation(self, client):
+        assert client.post("/v1/collections",
+                           json={"video_ids": ["only-one"]}).status_code == 422
+        assert client.post("/v1/collections",
+                           json={"video_ids": ["test-api", "ghost"]}).status_code == 404
+        assert client.post("/v1/collections/nope/search",
+                           json={"query": "x"}).status_code == 404

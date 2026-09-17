@@ -37,6 +37,7 @@ def seed_doc() -> VideoContextDocument:
         transcript=[
             Utterance(id="utt_0000", text="welcome to the demo", start=5.0, end=10.0),
             Utterance(id="utt_0001", text="the checkout failed badly", start=120.0, end=128.0),
+            Utterance(id="utt_0002", text="Welcome back now", start=10.0, end=16.0),
         ],
         ocr=[OCRText(id="ocr_0000", text="Welcome Dashboard", start=4.0, end=30.0,
                      first_frame_ts=4.0, last_frame_ts=30.0, stable=True, frame_count=4),
@@ -102,6 +103,74 @@ class TestIntelCommands:
         result = runner.invoke(app, ["ask", str(vctx_file), "What failed?", "--explain"])
         assert result.exit_code == 0, result.output
         assert "trace" in result.output
+
+
+class TestAgentCommands:
+    def test_graph_stats(self, vctx_file):
+        result = runner.invoke(app, ["graph", str(vctx_file), "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["stats"]["nodes"] > 0
+
+    def test_graph_neighbors(self, vctx_file):
+        result = runner.invoke(app, ["graph", str(vctx_file), "--node", "utt_0001",
+                                     "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["node"] == "utt_0001"
+
+    def test_entity_timeline(self, vctx_file):
+        result = runner.invoke(app, ["entity-timeline", str(vctx_file), "Welcome",
+                                     "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["count"] >= 1
+
+    def test_entity_timeline_missing(self, vctx_file):
+        result = runner.invoke(app, ["entity-timeline", str(vctx_file), "Zebra"])
+        assert result.exit_code == 0, result.output
+        assert "no entity" in result.output
+
+    def test_plan(self, vctx_file):
+        result = runner.invoke(app, ["plan", str(vctx_file),
+                                     "what happened before the checkout failed",
+                                     "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["intent"] == "temporal_before"
+
+    def test_explain_node(self, vctx_file):
+        result = runner.invoke(app, ["explain", str(vctx_file), "ocr_0001", "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["node"]["id"] == "ocr_0001"
+
+    def test_explain_missing(self, vctx_file):
+        result = runner.invoke(app, ["explain", str(vctx_file), "nope"])
+        assert result.exit_code == 1
+
+    def test_compare(self, vctx_file, tmp_path):
+        other = tmp_path / "other.vctx"
+        sio.save(seed_doc(), other)
+        result = runner.invoke(app, ["compare", str(vctx_file), str(other), "--json"])
+        assert result.exit_code == 0, result.output
+        assert json.loads(result.output)["video_a"] == "seed"
+
+    def test_collection_search(self, vctx_file, tmp_path):
+        other = tmp_path / "other.vctx"
+        sio.save(seed_doc(), other)
+        result = runner.invoke(app, ["collection", "search", "checkout",
+                                     str(vctx_file), str(other), "--json"])
+        assert result.exit_code == 0, result.output
+        body = json.loads(result.output)
+        assert body["videos_searched"] == 2
+
+    def test_collection_needs_two(self, vctx_file):
+        result = runner.invoke(app, ["collection", "search", "x", str(vctx_file)])
+        assert result.exit_code == 2
+
+    def test_collection_entities(self, vctx_file, tmp_path):
+        other = tmp_path / "other.vctx"
+        sio.save(seed_doc(), other)
+        result = runner.invoke(app, ["collection", "entities",
+                                     str(vctx_file), str(other), "--json"])
+        assert result.exit_code == 0, result.output
+        assert "links" in json.loads(result.output)
 
 
 class TestAdversarial:
