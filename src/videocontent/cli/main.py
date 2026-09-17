@@ -340,6 +340,9 @@ def search(
     end: str | None = typer.Option(None, "--to", help="Only before this timecode."),
     min_score: float | None = typer.Option(None, "--min-score", help="Drop weaker matches."),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+    temporal: bool = typer.Option(False, "--temporal",
+                                  help="Plan temporal questions (before/after/first/range)."),
+    explain: bool = typer.Option(False, "--explain", help="Show the query plan and notes."),
 ) -> None:
     """Find timestamped evidence for a query.
 
@@ -352,16 +355,37 @@ def search(
     from ..sdk import load as load_video
 
     video = load_video(document, config=state.config)
-    result = video.search(
-        query,
-        modalities=modality or None,
-        start=_optional_timestamp(start),
-        end=_optional_timestamp(end),
-        top_k=top_k,
-        min_score=min_score,
-    )
+    plan = None
+    if temporal:
+        plan, result = video.retriever.query_temporal(
+            query,
+            modalities=modality or None,
+            top_k=top_k,
+        )
+        # Re-apply the time/score filters the plain path supports.
+        if start is not None or end is not None or min_score is not None:
+            kept = [s for s in result.spans
+                    if (start is None or s.end >= _timestamp(start))
+                    and (end is None or s.start <= _timestamp(end))
+                    and (min_score is None or s.score >= min_score)]
+            from ..retrieval.query import SearchResult as _SR
+
+            result = _SR(query=result.query, spans=tuple(kept), modalities=result.modalities,
+                         total=len(kept), took_ms=result.took_ms, notes=result.notes)
+    else:
+        result = video.search(
+            query,
+            modalities=modality or None,
+            start=_optional_timestamp(start),
+            end=_optional_timestamp(end),
+            top_k=top_k,
+            min_score=min_score,
+        )
     if as_json:
-        _emit(result.to_dict())
+        payload = result.to_dict()
+        if plan is not None:
+            payload["query_plan"] = plan.to_dict()
+        _emit(payload)
         return
     if not result:
         console.print(Text("no matches for ") + render.bold(query))
@@ -369,6 +393,12 @@ def search(
         return
     console.print(render.spans_table(result))
     console.print(render.search_footer(result))
+    if explain:
+        lines = []
+        if plan is not None:
+            lines.append(f"plan: {plan.to_dict()}")
+        lines.extend(f"note: {note}" for note in result.notes)
+        console.print(render.explain_block("query", lines or ["lexical search, no plan"]))
 
 
 # -- at --------------------------------------------------------------------
@@ -423,11 +453,13 @@ def ask(
     ),
     min_score: float | None = typer.Option(None, "--min-score", help="Drop weaker matches."),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+    explain: bool = typer.Option(False, "--explain", help="Show the query plan and trace."),
 ) -> None:
     """Answer a question about the video using retrieved evidence and an LLM.
 
-    The pipeline: search → select top evidence → build context → LLM → answer.
-    Every answer carries its evidence spans so you can verify timestamps.
+    The pipeline: query plan → retrieval → evidence → context → LLM → answer.
+    Temporal questions ("before the error", "when did X first appear") are planned
+    explicitly. Every answer carries its evidence spans so you can verify timestamps.
     """
     from ..sdk import load as load_video
 
@@ -448,6 +480,179 @@ def ask(
         console.print(render.bold("\nEvidence:"))
         for i, span in enumerate(answer.evidence, 1):
             console.print(f"  [{i}] {span.timecode} ({span.modality}): {span.text[:120]}")
+    if explain and answer.trace:
+        trace = answer.trace
+        lines = [f"plan: {trace.get('query_plan', {})}",
+                 f"executor: {trace.get('executor', '?')}"]
+        retrieval = trace.get("retrieval", {})
+        lines.append(f"retrieval: {retrieval.get('spans', 0)} spans "
+                     f"(total {retrieval.get('total', 0)})")
+        lines.extend(f"note: {note}" for note in retrieval.get("notes", ()))
+        lines.append(f"outcome: {trace.get('outcome', '?')}")
+        console.print(render.explain_block("trace", lines))
+
+
+# -- timeline / events / entities / changes / chapters / context ---------------
+
+
+def _load_video(document: Path):
+    from ..sdk import load as load_video
+
+    return load_video(document, config=state.config)
+
+
+@app.command()
+@friendly
+def timeline(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    start: str | None = typer.Option(None, "--from", help="Range start timecode."),
+    end: str | None = typer.Option(None, "--to", help="Range end timecode."),
+    modality: list[str] = typer.Option([], "--modality", "-m", help="Restrict modalities."),
+    top_k: int = typer.Option(100, "--top-k", "-k", help="Max facts to show. 0 for all."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Show everything the document knows about a time range, in timeline order."""
+    video = _load_video(document)
+    result = video.timeline(_optional_timestamp(start) or 0.0,
+                            _optional_timestamp(end), modalities=modality or None,
+                            top_k=top_k)
+    if as_json:
+        _emit(result.to_dict())
+        return
+    if not result:
+        console.print(Text("nothing recorded in ") + render.bold(result.query))
+        return
+    console.print(render.bold(result.query))
+    console.print(render.snapshot_table(result))
+    console.print(render.search_footer(result))
+
+
+@app.command()
+@friendly
+def events(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    type_: str | None = typer.Option(None, "--type", "-t", help="Only this event type."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """List typed temporal events with the evidence behind each one."""
+    video = _load_video(document)
+    matched = [e for e in video.document.events if type_ is None or e.type == type_]
+    if as_json:
+        _emit({"events": [e.model_dump(mode="json") for e in matched]})
+        return
+    if not matched:
+        console.print(Text("no events") + (Text(f" of type {type_}") if type_ else Text("")))
+        return
+    doc = video.document
+    console.print(render.bold(f"{len(matched)} events"))
+    console.print(render.events_table(doc))
+
+
+@app.command()
+@friendly
+def entities(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    type_: str | None = typer.Option(None, "--type", "-t",
+                                     help="Only this entity type (ERROR, COMMAND, CONCEPT)."),
+    top_k: int = typer.Option(50, "--top-k", "-k", help="Max entities to show."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """List timestamp-grounded entities with cross-modal links and uncertainty."""
+    video = _load_video(document)
+    matched = video.entities()
+    if type_ is not None:
+        matched = [e for e in matched if e.type == type_.upper()]
+    matched = matched[:top_k] if top_k > 0 else matched
+    if as_json:
+        _emit({"entities": [e.to_dict() for e in matched]})
+        return
+    if not matched:
+        console.print(Text("no entities found"))
+        return
+    console.print(render.entities_table(matched))
+
+
+@app.command()
+@friendly
+def changes(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Show what changed between adjacent regions (text, speech, scenes)."""
+    video = _load_video(document)
+    found = video.changes()
+    if as_json:
+        _emit({"changes": [c.to_dict() for c in found]})
+        return
+    if not found:
+        console.print(Text("no changes detected"))
+        return
+    console.print(render.changes_table(found))
+
+
+@app.command()
+@friendly
+def chapters(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    target: float = typer.Option(300.0, "--target-s", help="Target seconds per chapter."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+) -> None:
+    """Show extractive chapters. Titles are derived keywords, marked as such."""
+    from ..temporal import build_chapters
+
+    video = _load_video(document)
+    found = build_chapters(video.document, target_s=target)
+    if as_json:
+        _emit({"chapters": [c.to_dict() for c in found]})
+        return
+    if not found:
+        console.print(Text("no chapters (unknown duration)"))
+        return
+    console.print(render.chapters_table(found))
+
+
+@app.command(name="context")
+@friendly
+def context_cmd(
+    document: Path = typer.Argument(
+        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
+    ),
+    task: str = typer.Argument(..., help="Task to build context for."),
+    max_tokens: int = typer.Option(4000, "--max-tokens", help="Token budget."),
+    max_spans: int | None = typer.Option(None, "--max-spans", help="Cap evidence spans."),
+    max_frames: int | None = typer.Option(None, "--max-frames", help="Cap frames."),
+    expand: float = typer.Option(0.0, "--expand-s",
+                                 help="Pull ±N seconds around each match."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
+    explain: bool = typer.Option(False, "--explain", help="Show budget decisions."),
+) -> None:
+    """Build a minimal, budgeted AI context package for a task."""
+    video = _load_video(document)
+    ctx = video.context(task, max_tokens=max_tokens, max_spans=max_spans,
+                        max_frames=max_frames, expand_s=expand)
+    if as_json:
+        _emit(ctx.to_dict())
+        return
+    console.print(render.bold(f"task: {ctx.task}"))
+    console.print(f"tokens ≈ {ctx.token_estimate} · "
+                  f"{len(ctx.evidence)} spans · {len(ctx.frames)} frames")
+    if ctx.evidence:
+        from ..retrieval.query import SearchResult as _SR
+
+        console.print(render.spans_table(_SR(query=task, spans=tuple(ctx.evidence),
+                                            total=len(ctx.evidence))))
+    if explain and ctx.budget_notes:
+        console.print(render.explain_block("budget", ctx.budget_notes))
 
 
 # -- source ----------------------------------------------------------------

@@ -326,7 +326,7 @@ async def download_vctx(video_id: str) -> FileResponse:
 async def search_video(video_id: str, request: SearchRequest) -> SearchResponse:
     """Search video content."""
     doc = _get_doc(video_id)
-    video = load(doc=doc)
+    video = Video.from_document(doc)
 
     result = video.search(
         request.query,
@@ -362,7 +362,7 @@ async def search_video(video_id: str, request: SearchRequest) -> SearchResponse:
 async def ask_video(video_id: str, request: AskRequest) -> AskResponse:
     """Ask a question about the video."""
     doc = _get_doc(video_id)
-    video = load(doc=doc)
+    video = Video.from_document(doc)
 
     answer = video.ask(
         request.question,
@@ -474,6 +474,41 @@ async def get_segments(video_id: str) -> list[dict[str, Any]]:
     ]
 
 
+@app.get("/v1/videos/{video_id}/entities")
+async def get_entities(video_id: str) -> list[dict[str, Any]]:
+    """List timestamp-grounded entities with uncertainty flags."""
+    from videocontent.entities import extract_entities
+
+    doc = _get_doc(video_id)
+    return [e.to_dict() for e in extract_entities(doc)]
+
+
+@app.get("/v1/videos/{video_id}/changes")
+async def get_changes(video_id: str) -> list[dict[str, Any]]:
+    """Show evidence-backed changes between adjacent regions."""
+    from videocontent.temporal import detect_changes
+
+    doc = _get_doc(video_id)
+    return [c.to_dict() for c in detect_changes(doc)]
+
+
+@app.get("/v1/videos/{video_id}/chapters")
+async def get_chapters(video_id: str) -> list[dict[str, Any]]:
+    """List extractive chapters (titles are derived, marked as such)."""
+    from videocontent.temporal import build_chapters
+
+    doc = _get_doc(video_id)
+    return [c.to_dict() for c in build_chapters(doc)]
+
+
+@app.get("/v1/videos/{video_id}/receipt")
+async def get_receipt(video_id: str) -> dict[str, Any]:
+    """Processing receipt: how this video's context was generated."""
+    doc = _get_doc(video_id)
+    video = Video.from_document(doc)
+    return video.receipt()
+
+
 @app.get("/v1/videos/{video_id}/frames")
 async def get_frames(video_id: str) -> list[dict[str, Any]]:
     """Get sampled frames."""
@@ -494,7 +529,7 @@ async def get_frames(video_id: str) -> list[dict[str, Any]]:
 async def get_context(video_id: str, request: ContextRequest) -> ContextResponse:
     """Get optimized AI context for a task."""
     doc = _get_doc(video_id)
-    video = load(doc=doc)
+    video = Video.from_document(doc)
 
     from videocontent.routing import ContextBudget
 
@@ -564,7 +599,7 @@ async def get_context(video_id: str, request: ContextRequest) -> ContextResponse
 async def get_profile(video_id: str, request: ProfileRequest) -> ProfileResponse:
     """Get a specific semantic profile."""
     doc = _get_doc(video_id)
-    video = load(doc=doc)
+    video = Video.from_document(doc)
 
     try:
         profile = video.profile(request.profile_name)
@@ -589,7 +624,7 @@ async def get_profile(video_id: str, request: ProfileRequest) -> ProfileResponse
 async def list_profiles(video_id: str) -> dict[str, Any]:
     """Get all available semantic profiles for this video."""
     doc = _get_doc(video_id)
-    video = load(doc=doc)
+    video = Video.from_document(doc)
 
     profiles = video.profiles()
     result = {}

@@ -53,6 +53,8 @@ class Answer:
     confidence: float
     evidence: list[Any] = field(default_factory=list)
     spans: list[Any] = field(default_factory=list)
+    trace: dict[str, Any] = field(default_factory=dict)
+    """How the answer was built: query plan, retrieval stats, expansion, LLM used."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -60,6 +62,7 @@ class Answer:
             "answer": self.answer,
             "confidence": self.confidence,
             "evidence": [span.to_dict() if hasattr(span, "to_dict") else str(span) for span in self.evidence],
+            "trace": self.trace,
         }
 
 
@@ -82,6 +85,8 @@ class OptimizedContext:
     global_context: Any | None
     summaries: dict[str, str]
     token_estimate: int = 0
+    budget_notes: list[str] = field(default_factory=list)
+    """What the budgeter cut or expanded, and why — the debugger's entry point."""
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -95,6 +100,7 @@ class OptimizedContext:
             "global_context": self.global_context.model_dump() if hasattr(self.global_context, "model_dump") else self.global_context,
             "summaries": self.summaries,
             "token_estimate": self.token_estimate,
+            "budget_notes": self.budget_notes,
         }
 
 #: What ``save()`` writes when given no path. ``demo.mp4`` → ``demo.vctx`` (§50).
@@ -270,6 +276,61 @@ class Video:
         """Everything known about one instant. Accepts seconds or ``HH:MM:SS.mmm``."""
         return self.retriever.at(_seconds(ts), **kw)
 
+    def timeline(self, start: float | str = 0.0, end: float | str | None = None,
+                 **kw: Any) -> SearchResult:
+        """Everything known about ``[start, end]`` in timeline order."""
+        stop = _seconds(end) if isinstance(end, str) else end
+        return self.retriever.timeline(_seconds(start), stop, **kw)
+
+    def chapters(self) -> list[Any]:
+        """Extractive, deterministic chapters with honestly-marked derived titles."""
+        from .temporal import build_chapters
+
+        return build_chapters(self.document)
+
+    def entities(self) -> list[Any]:
+        """Timestamp-grounded entities with cross-modal links and uncertainty flags."""
+        from .entities import extract_entities
+
+        return extract_entities(self.document)
+
+    def changes(self) -> list[Any]:
+        """Cheap change detection between adjacent regions, evidence-backed."""
+        from .temporal import detect_changes
+
+        return detect_changes(self.document)
+
+    def plan(self, task: str) -> dict[str, Any]:
+        """What would ``task`` need? Returns plan + coverage against this document."""
+        from .plans import check_coverage, plan_for_task
+
+        if not self.processed:
+            raise NotProcessedError(
+                f"{self.source.name} has not been processed",
+                hint="call video.process() first",
+            )
+        plan = plan_for_task(task)
+        return {"plan": plan.to_dict(), "coverage": check_coverage(self.document, plan).to_dict()}
+
+    def receipt(self) -> dict[str, Any]:
+        """Processing receipt: how this context was generated, from the artifact itself."""
+        doc = self.document
+        source = getattr(doc, "source", None)
+        return {
+            "video_id": doc.id,
+            "vctx_version": doc.vctx_version,
+            "producer": doc.producer.model_dump(mode="json"),
+            "source": source.model_dump(mode="json") if source is not None else None,
+            "stages": [s.model_dump(mode="json") for s in doc.stages],
+            "metrics": doc.metrics.model_dump(mode="json"),
+            "modalities": {
+                "transcript": len(doc.transcript), "ocr": len(doc.ocr),
+                "vision": len(doc.vision), "events": len(doc.events),
+                "scenes": len(doc.scenes), "segments": len(doc.segments),
+                "frames": len(doc.frames),
+            },
+        }
+
     # -- Q&A -----------------------------------------------------------------
 
     def ask(
@@ -282,11 +343,14 @@ class Video:
     ) -> "Answer":
         """Answer a question using retrieved evidence + an LLM.
 
-        The pipeline: search → select top evidence → build context → LLM → answer.
-        Every answer carries its evidence spans so the caller can verify timestamps.
+        The pipeline: query plan → retrieval → evidence → context → LLM → answer.
+        Temporal questions ("before the error", "when did X first appear") are
+        planned explicitly; the plan is always in ``answer.trace``. Every answer
+        carries its evidence spans so the caller can verify timestamps.
         """
         from .llm import NullLLM, OpenAILLM
         from .retrieval.query import SearchResult
+        from .temporal import parse_temporal_query
 
         if not self.processed:
             raise NotProcessedError(
@@ -294,21 +358,33 @@ class Video:
                 hint="call video.process() first",
             )
 
-        # Search for relevant evidence
-        search_result: SearchResult = self.search(
-            question,
-            modalities=modalities,
-            top_k=top_k,
-            min_score=min_score,
-        )
+        plan = parse_temporal_query(question)
+        trace: dict[str, Any] = {"query_plan": plan.to_dict()}
+        # Temporal questions execute through the temporal planner; everything else
+        # uses ranked search. Either way the trace says which ran.
+        if plan.is_temporal:
+            _, search_result = self.retriever.query_temporal(
+                question, modalities=modalities, top_k=top_k)
+            trace["executor"] = "temporal"
+        else:
+            search_result = self.search(
+                question, modalities=modalities, top_k=top_k, min_score=min_score)
+            trace["executor"] = "search"
+        trace["retrieval"] = {
+            "spans": len(search_result.spans), "total": search_result.total,
+            "modalities": list(search_result.modalities),
+            "notes": list(search_result.notes),
+        }
 
         if not search_result:
+            trace["outcome"] = "insufficient_evidence"
             return Answer(
                 question=question,
                 answer="I couldn't find any relevant information in the video to answer this question.",
                 confidence=0.0,
                 evidence=[],
                 spans=[],
+                trace=trace,
             )
 
         # Build context from evidence
@@ -349,24 +425,30 @@ class Video:
         except Exception as exc:
             # If LLM fails, return evidence-only answer
             log.warning("ask.llm_failed", extra={"error": str(exc)})
+            trace["outcome"] = "llm_failed"
+            trace["llm"] = {"provider": llm_provider, "error": type(exc).__name__}
             return Answer(
                 question=question,
                 answer=f"LLM unavailable ({type(exc).__name__}). Here is the relevant evidence:\n" + context,
                 confidence=0.5,
                 evidence=list(search_result.spans),
                 spans=list(search_result.spans),
+                trace=trace,
             )
 
         # Calculate confidence based on evidence quality
         confidences = [s.confidence for s in search_result.spans if s.confidence is not None]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
 
+        trace["outcome"] = "answered"
+        trace["llm"] = {"provider": llm_provider, "model": self.config.llm.model}
         return Answer(
             question=question,
             answer=answer_text,
             confidence=min(avg_confidence, 1.0),
             evidence=list(search_result.spans),
             spans=list(search_result.spans),
+            trace=trace,
         )
 
     # -- Semantic Context ----------------------------------------------------
@@ -377,6 +459,10 @@ class Video:
         *,
         max_tokens: int = 4000,
         modalities: list[str] | None = None,
+        max_spans: int | None = None,
+        max_frames: int | None = None,
+        max_seconds: float | None = None,
+        expand_s: float = 0.0,
     ) -> "OptimizedContext":
         """Get optimized AI context for a specific task.
 
@@ -393,6 +479,10 @@ class Video:
                   - "Describe the animations"
             max_tokens: Maximum tokens for the returned context.
             modalities: Optional modality filter for evidence retrieval.
+            max_spans: Cap evidence spans (most relevant kept).
+            max_frames: Cap representative frames.
+            max_seconds: Cap total evidence span duration.
+            expand_s: Pull ±N seconds of co-occurring evidence around each match.
 
         Returns:
             OptimizedContext with task classification, selected profiles,
@@ -413,13 +503,16 @@ class Video:
             )
 
         task_classification: TaskClassification = classify_task(task, self.document)
-        budget = ContextBudget(max_tokens=max_tokens)
+        budget = ContextBudget(max_tokens=max_tokens, max_spans=max_spans,
+                               max_frames=max_frames, max_seconds=max_seconds)
 
         selection = select_context(
             self.document,
             task_classification,
             budget,
             query=task if task_classification.requires_evidence else None,
+            expand_s=expand_s,
+            modalities=modalities,
         )
 
         # Pack into LLM-ready context
@@ -436,6 +529,7 @@ class Video:
             global_context=selection["global_context"],
             summaries=selection["summaries"],
             token_estimate=selection["token_estimate"],
+            budget_notes=selection.get("budget_notes", []),
         )
 
     def context_for(
@@ -444,9 +538,10 @@ class Video:
         *,
         max_tokens: int = 4000,
         modalities: list[str] | None = None,
+        **kw: Any,
     ) -> "OptimizedContext":
         """Alias for context() - more natural for task-oriented usage."""
-        return self.context(task, max_tokens=max_tokens, modalities=modalities)
+        return self.context(task, max_tokens=max_tokens, modalities=modalities, **kw)
 
     def profile(
         self,
@@ -559,4 +654,14 @@ def process(
     return video
 
 
-__all__ = ["VCTX_SUFFIX", "NotProcessedError", "Video", "inspect_source", "load", "open", "process", "Answer", "OptimizedContext"]
+__all__ = [
+    "VCTX_SUFFIX",
+    "Answer",
+    "NotProcessedError",
+    "OptimizedContext",
+    "Video",
+    "inspect_source",
+    "load",
+    "open",
+    "process",
+]

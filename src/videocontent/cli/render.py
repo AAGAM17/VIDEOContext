@@ -397,13 +397,85 @@ def truncation_note(shown: int, total: int, flag: str) -> RenderableType | None:
     return Text(f"… {total - shown} more — pass {flag} to see all", style="dim")
 
 
+def explain_block(title: str, lines: list[str]) -> Panel:
+    """Query plan / retrieval trace for ``--explain``: how a result was built."""
+    body = "\n".join(lines) if lines else "—"
+    return Panel(Text(body), title=title, box=box.SIMPLE_HEAD)
+
+
+def entities_table(entities: list[Any]) -> Table:
+    """Timestamp-grounded entities: name, type, sightings, uncertainty."""
+    table = Table(box=box.SIMPLE_HEAD, pad_edge=False)
+    table.add_column("ENTITY", overflow="fold")
+    table.add_column("TYPE", no_wrap=True)
+    table.add_column("SEEN", no_wrap=True, style="cyan")
+    table.add_column("MODALITIES", no_wrap=True)
+    table.add_column("CONF", justify="right", no_wrap=True, style="dim")
+    for entity in entities:
+        seen = ""
+        if entity.first_seen is not None:
+            seen = format_span(entity.first_seen, entity.last_seen or entity.first_seen)
+            if len(entity.occurrences) > 1:
+                seen += f" x{len(entity.occurrences)}"
+        flag = " ?" if entity.ambiguous else ""
+        table.add_row(
+            shorten(entity.name, 60),
+            entity.type + flag,
+            seen,
+            ",".join(entity.linked_modalities),
+            _num(entity.confidence),
+        )
+    return table
+
+
+def changes_table(changes: list[Any]) -> Table:
+    """Before/after content turnover with the evidence behind each change."""
+    table = Table(box=box.SIMPLE_HEAD, pad_edge=False)
+    table.add_column("WHEN", no_wrap=True, style="cyan")
+    table.add_column("CHANGE", no_wrap=True)
+    table.add_column("BEFORE → AFTER", overflow="fold")
+    for change in changes:
+        table.add_row(
+            format_timecode(change.ts),
+            change.change_type,
+            Group(
+                Text(shorten(change.before, 100) or "—"),
+                Text("→ " + shorten(change.after, 100) or "—"),
+                _dim(" ".join(change.evidence_ids)),
+            ),
+        )
+    return table
+
+
+def chapters_table(chapters: list[Any]) -> Table:
+    """Extractive chapters. Titles are derived — the table marks them as such."""
+    table = Table(box=box.SIMPLE_HEAD, pad_edge=False)
+    table.add_column("RANGE", no_wrap=True, style="cyan")
+    table.add_column("TITLE", overflow="fold")
+    table.add_column("SIGNALS", no_wrap=True, style="dim")
+    for chapter in chapters:
+        title = shorten(chapter.title, 80)
+        if chapter.inferred:
+            title += " (derived)"
+        table.add_row(
+            format_span(chapter.start, chapter.end),
+            Text(title),
+            ",".join(chapter.signals),
+        )
+    return table
+
+
 __all__ = [
     "bold",
+    "changes_table",
+    "chapters_table",
     "console",
     "counts_table",
     "doctor_table",
+    "entities_table",
     "errors",
     "events_table",
+    "explain_block",
     "metrics_table",
     "ocr_table",
     "overview",

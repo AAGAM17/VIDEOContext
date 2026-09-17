@@ -191,6 +191,19 @@ New video origins (object storage, platforms, catalogs) plug in behind the
    (private IP, redirect-to-private, oversized, wrong content-type).
 5. Document the source as supported only when it actually works end to end.
 
+### Add a Temporal View or Entity Detector
+
+Derived intelligence (chapters, changes, states, entities) lives in
+`src/videocontent/temporal.py` / `src/videocontent/entities.py` as pure functions
+over the document:
+
+1. Copy timestamps from facts — never generate them. Instant spans use `end == start`.
+2. Cite evidence: every object carries reference IDs to the facts behind it.
+3. Flag inference: derived titles, heuristic links, and low-confidence calls must
+   say so (`inferred`, `ambiguous`, confidence) rather than read as ground truth.
+4. Keep it cheap: no models, no network, no new required dependencies.
+5. Add unit tests on hand-built documents, including empty and missing-modality cases.
+
 # Development Setup
 
 Start by cloning your fork of the repository.

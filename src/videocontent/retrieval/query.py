@@ -36,6 +36,7 @@ from typing import Any
 from ..config import RetrievalConfig
 from ..logging import get_logger
 from ..schema.v1 import VideoContextDocument
+from ..temporal import TemporalQuery, TemporalRelation, parse_temporal_query
 from ..timecode import format_span, format_timecode
 from .fusion import Candidate, boost_cooccurrence, merge_adjacent, rrf
 from .index import MODALITIES, Record, build_records
@@ -65,6 +66,8 @@ class EvidenceSpan:
     confidence: float | None = None
     language: str | None = None
     kind: str | None = None
+    video_id: str | None = None
+    """Owning video in collection search; None for single-video retrieval."""
 
     @property
     def timecode(self) -> str:
@@ -375,6 +378,217 @@ class Retriever:
             took_ms=(time.perf_counter() - began) * 1000.0,
         )
 
+    def timeline(
+        self,
+        start: float = 0.0,
+        end: float | None = None,
+        *,
+        modalities: Sequence[str] | None = None,
+        top_k: int = 100,
+    ) -> SearchResult:
+        """Everything the document knows about ``[start, end]``, in timeline order.
+
+        Like :meth:`at` but for a range: unranked, one span per overlapping fact,
+        ordered by modality then time. ``top_k`` bounds the output (0 for all) —
+        a 2-hour window can hold thousands of facts, and an agent must not drown.
+        """
+        began = time.perf_counter()
+        selected = self._selected(modalities)
+        stop = self.doc.video.duration if end is None else end
+        order = {name: position for position, name in enumerate(MODALITIES)}
+        covering = [
+            record
+            for record in self.records
+            if record.modality in selected and _within(record, start, stop)
+        ]
+        covering.sort(key=lambda record: (order[record.modality], record.start, record.key))
+        total = len(covering)
+        kept = covering if top_k <= 0 else covering[:top_k]
+        label = format_span(start, stop)
+        spans = tuple(_record_to_span(record, 1.0, f"within {label}") for record in kept)
+        notes = ()
+        if total > len(kept):
+            notes = (f"showing {len(kept)} of {total} facts in range — narrow the window",)
+        return SearchResult(
+            query=label, spans=spans, modalities=selected, total=total,
+            took_ms=(time.perf_counter() - began) * 1000.0, notes=notes,
+        )
+
+    def query_temporal(
+        self,
+        question: str,
+        *,
+        modalities: Sequence[str] | None = None,
+        top_k: int | None = None,
+        expand_s: float = 5.0,
+    ) -> tuple[TemporalQuery, SearchResult]:
+        """Answer a temporal question with an explicit, inspectable plan.
+
+        Returns ``(plan, result)``: the plan says what was understood (anchor,
+        relation, range), the result carries per-span reasons naming the temporal
+        match. Non-temporal questions behave exactly like :meth:`search` — the
+        parser only fires on explicit temporal phrasing.
+        """
+        began = time.perf_counter()
+        config = self.config
+        limit = config.top_k if top_k is None else top_k
+        plan = parse_temporal_query(question)
+        if not plan.is_temporal:
+            return plan, self.search(question, modalities=modalities, top_k=top_k)
+
+        if plan.first_only and not plan.start and not plan.end and not plan.relation:
+            result = self.search(plan.anchor, modalities=modalities,
+                                 top_k=max(limit * 5, 25) if limit > 0 else 0)
+            ordered = sorted(result.spans, key=lambda s: (s.start, s.end))
+            kept = ordered if limit <= 0 else ordered[:limit]
+            first = kept[0] if kept else None
+            spans = tuple(
+                EvidenceSpan(
+                    start=s.start, end=s.end, modality=s.modality, text=s.text,
+                    score=s.score, ref_ids=s.ref_ids, segment_ids=s.segment_ids,
+                    matched_terms=s.matched_terms,
+                    reason=f"{s.reason}; first occurrence of {plan.anchor!r}"
+                    if s.reason else f"first occurrence of {plan.anchor!r}",
+                    confidence=s.confidence, language=s.language, kind=s.kind,
+                    video_id=s.video_id,
+                )
+                for s in kept
+            )
+            note = (f"first occurrence of {plan.anchor!r}"
+                    + (f" at {first.timecode}" if first else "; nothing matched"),)
+            return plan, SearchResult(
+                query=question, spans=spans, modalities=result.modalities,
+                total=len(ordered), took_ms=(time.perf_counter() - began) * 1000.0,
+                notes=result.notes + note)
+
+        if plan.relation in (TemporalRelation.BEFORE, TemporalRelation.AFTER):
+            return plan, self._before_after(plan, modalities, limit, began)
+
+        # Ranged query (explicit timecodes, or co-occurrence expansion around a match).
+        anchor_text = plan.anchor or question
+        base = self.search(anchor_text, modalities=modalities,
+                           top_k=max(limit * 5, 50) if limit > 0 else 0,
+                           start=plan.start, end=plan.end)
+        if plan.start is not None or plan.end is not None:
+            window_label = format_span(plan.start or 0.0,
+                                       plan.end if plan.end is not None else 0.0)
+            if not base.spans:
+                # Honest fallback: no lexical match in range — show the range itself
+                # rather than an empty answer.
+                windowed = self.timeline(plan.start or 0.0, plan.end,
+                                         modalities=modalities, top_k=limit)
+                return plan, SearchResult(
+                    query=question, spans=windowed.spans, modalities=windowed.modalities,
+                    total=windowed.total,
+                    took_ms=(time.perf_counter() - began) * 1000.0,
+                    notes=(f"no text matched in range; showing timeline {window_label}",))
+        if plan.start is not None or plan.end is not None:
+            window_label = format_span(plan.start or 0.0,
+                                       plan.end if plan.end is not None else 0.0)
+            spans = tuple(
+                EvidenceSpan(
+                    start=s.start, end=s.end, modality=s.modality, text=s.text,
+                    score=s.score, ref_ids=s.ref_ids, segment_ids=s.segment_ids,
+                    matched_terms=s.matched_terms,
+                    reason=f"{s.reason}; within {window_label}" if s.reason
+                    else f"within {window_label}",
+                    confidence=s.confidence, language=s.language, kind=s.kind,
+                    video_id=s.video_id,
+                )
+                for s in (base.spans if limit <= 0 else base.spans[:limit])
+            )
+            return plan, SearchResult(
+                query=question, spans=spans, modalities=base.modalities,
+                total=base.total, took_ms=(time.perf_counter() - began) * 1000.0,
+                notes=(*base.notes, f"constrained to {window_label}"))
+        # Co-occurrence ("while"): expand each match into its temporal neighborhood.
+        expanded = self._expand_around(base.spans, expand_s, modalities, limit)
+        return plan, SearchResult(
+            query=question, spans=expanded, modalities=base.modalities,
+            total=len(expanded), took_ms=(time.perf_counter() - began) * 1000.0,
+            notes=(*base.notes, f"expanded ±{expand_s:g}s around matches"))
+
+    def _before_after(
+        self,
+        plan: TemporalQuery,
+        modalities: Sequence[str] | None,
+        limit: int,
+        began: float,
+    ) -> SearchResult:
+        """Evidence strictly before/after the anchor's first occurrence."""
+        selected = self._selected(modalities)
+        anchors = self.search(plan.anchor, modalities=modalities, top_k=5)
+        if not anchors:
+            return SearchResult(
+                query=plan.raw, spans=(), modalities=selected, total=0,
+                took_ms=(time.perf_counter() - began) * 1000.0,
+                notes=(f"anchor {plan.anchor!r} matched nothing — "
+                       "cannot reason about before/after",))
+        pivot = anchors.spans[0]  # top-scored anchor: the most relevant occurrence,
+        # not merely the earliest — "before the error" means before the error match
+        # the retriever is most confident about.
+        before = plan.relation is TemporalRelation.BEFORE
+        pool = [
+            record for record in self.records
+            if record.modality in selected
+            and ((record.end <= pivot.start + 1e-6) if before
+                 else (record.start >= pivot.end - 1e-6))
+        ]
+        pool.sort(key=lambda r: (-r.end if before else r.start, r.key))
+        kept = pool if limit <= 0 else pool[:limit]
+        pivot_tc = format_timecode(pivot.start if before else pivot.end)
+        spans = tuple(
+            _record_to_span(
+                record,
+                1.0 / (1.0 + abs((pivot.start - record.end) if before
+                                 else (record.start - pivot.end))),
+                f"{'ends' if before else 'starts'} "
+                f"{abs((pivot.start - record.end) if before else (record.start - pivot.end)):.1f}s "
+                f"{'before' if before else 'after'} {plan.anchor!r} at {pivot_tc}",
+            )
+            for record in kept
+        )
+        return SearchResult(
+            query=plan.raw, spans=spans, modalities=selected, total=len(pool),
+            took_ms=(time.perf_counter() - began) * 1000.0,
+            notes=(f"{'before' if before else 'after'} top {plan.anchor!r} match "
+                   f"at {pivot_tc} ({len(anchors.spans)} anchor matches considered)",))
+
+    def _expand_around(
+        self,
+        spans: Sequence[EvidenceSpan],
+        radius: float,
+        modalities: Sequence[str] | None,
+        limit: int,
+    ) -> tuple[EvidenceSpan, ...]:
+        """Each match plus the facts co-occurring in its neighborhood, deduped."""
+        from ..temporal import merge_windows, window_around
+
+        selected = self._selected(modalities)
+        duration = self.doc.video.duration
+        windows = merge_windows([window_around(s.start, s.end, radius, duration) for s in spans])
+        seen: set[str] = set()
+        out: list[EvidenceSpan] = []
+        for span in spans:  # the matches themselves first, in rank order
+            key = (span.modality, span.ref_ids)
+            seen.add(str(key))
+            out.append(span)
+        for window in windows:
+            for record in self.records:
+                if record.modality not in selected:
+                    continue
+                if not _within(record, window.start, window.end):
+                    continue
+                key = (record.modality, (record.id,))
+                if str(key) in seen:
+                    continue
+                seen.add(str(key))
+                out.append(_record_to_span(
+                    record, 0.5,
+                    f"co-occurs within ±{radius:g}s of evidence at "
+                    f"{format_timecode(window.start)}"))
+        return tuple(out if limit <= 0 else out[: max(limit, len(spans))])
+
 
 def _within(record: Record, start: float | None, end: float | None) -> bool:
     if start is not None and record.end < start:
@@ -386,6 +600,24 @@ def _reasons(hit: LexicalHit) -> tuple[str, ...]:
     reasons = ["exact phrase"] if hit.phrase else []
     reasons.append(f"matched {hit.coverage:.0%} of query weight")
     return tuple(reasons)
+
+
+def _record_to_span(record: Record, score: float, reason: str) -> EvidenceSpan:
+    """One fact as a span — used by timeline and temporal queries, never ranked."""
+    return EvidenceSpan(
+        start=record.start,
+        end=record.end,
+        modality=record.modality,
+        text=record.text,
+        score=score,
+        ref_ids=(record.id,),
+        segment_ids=tuple(record.segment_ids),
+        matched_terms=(),
+        reason=reason,
+        confidence=record.confidence,
+        language=record.language,
+        kind=record.kind,
+    )
 
 
 def _to_span(candidate: Candidate) -> EvidenceSpan:
@@ -432,4 +664,28 @@ def at(
     return Retriever(doc, config).at(ts, **kw)
 
 
-__all__ = ["EvidenceSpan", "Retriever", "SearchResult", "at", "search"]
+def timeline(
+    doc: VideoContextDocument,
+    start: float = 0.0,
+    end: float | None = None,
+    *,
+    config: RetrievalConfig | None = None,
+    **kw: Any,
+) -> SearchResult:
+    """One-shot range lookup. See :meth:`Retriever.timeline`."""
+    return Retriever(doc, config).timeline(start, end, **kw)
+
+
+def query_temporal(
+    doc: VideoContextDocument,
+    question: str,
+    *,
+    config: RetrievalConfig | None = None,
+    **kw: Any,
+) -> tuple[Any, SearchResult]:
+    """One-shot temporal query. See :meth:`Retriever.query_temporal`."""
+    return Retriever(doc, config).query_temporal(question, **kw)
+
+
+__all__ = ["EvidenceSpan", "Retriever", "SearchResult", "at", "query_temporal", "search",
+           "timeline"]

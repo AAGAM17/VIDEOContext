@@ -588,7 +588,71 @@ answer
 confidence
 evidence
 spans
+trace
 ```
+
+`trace` records the query plan (temporal or plain search), retrieval stats, and
+the LLM provider used — the debugger's entry point for "why this answer".
+
+Temporal questions are planned explicitly:
+
+```python
+answer = video.ask("What happened before the error?")
+print(answer.trace["query_plan"])
+# {'anchor': 'the error', 'relation': 'before', ...}
+```
+
+Supported temporal patterns: `before X`, `after X`, `between A and B`,
+`while X`, `when did X first appear`, and bare timecodes (`pricing at 12:20`).
+
+---
+
+# Temporal Intelligence
+
+Video is treated as a temporal multimodal world, not a bag of facts. All views
+below are pure functions over the `.vctx` document — no reprocessing, no network —
+and every timestamp is copied from the underlying evidence.
+
+```python
+video.timeline(600, 900)   # everything known about a range, in order
+video.chapters()           # extractive chapters (titles marked derived)
+video.entities()           # Stripe in OCR + "Stripe" in speech → one linked entity
+video.changes()            # text turnover, speech transitions, scene boundaries
+video.receipt()            # processing receipt: how this context was generated
+video.plan("What error appeared?")  # stages needed + coverage against this doc
+```
+
+Entities carry occurrence timestamps, linked modalities, and uncertainty
+(`ambiguous=True` when the link is weak). Chapters group scenes with
+frequency-ranked keyword titles, always `inferred=True`.
+
+## Collections: many videos, one index
+
+```python
+from videocontent.collection import CollectionIndex, compare
+
+index = CollectionIndex({"demo-a": doc_a, "demo-b": doc_b})
+result = index.search("OAuth login")  # spans tagged with video_id
+diff = compare("demo-a", doc_a, "demo-b", doc_b)  # shared/unique entities + events
+```
+
+Collections never merge files — each `.vctx` keeps its identity and provenance.
+
+## Minimal context packages
+
+```python
+ctx = video.context(
+    "What caused the checkout error?",
+    max_spans=5,      # cap evidence spans
+    max_seconds=120,  # cap evidence duration
+    max_frames=3,     # cap frames
+    expand_s=5.0,     # pull ±5 s of co-occurring evidence around each match
+)
+print(ctx.token_estimate, ctx.budget_notes)
+```
+
+The pipeline is query → retrieval → temporal expansion → dedup → budget →
+package. `budget_notes` records every cut, so minimization is auditable.
 
 ---
 
@@ -776,6 +840,44 @@ videocontent ask \
   demo.vctx \
   "What was the revenue?" \
   --json
+```
+
+Show the query plan and trace:
+
+```bash
+videocontent ask \
+  demo.vctx \
+  "What happened before the error?" \
+  --explain
+```
+
+---
+
+## Timeline, Events, Entities, Changes, Chapters
+
+```bash
+videocontent timeline demo.vctx --from 10:00 --to 15:00
+videocontent events demo.vctx --type error_shown
+videocontent entities demo.vctx
+videocontent changes demo.vctx
+videocontent chapters demo.vctx
+```
+
+All support `--json`. Temporal search planning:
+
+```bash
+videocontent search demo.vctx "what happened before the error" --temporal --json
+# includes "query_plan": {"anchor": ..., "relation": "before", ...}
+```
+
+## Context Packages
+
+```bash
+videocontent context demo.vctx "What caused the checkout error?" \
+  --max-spans 5 \
+  --max-frames 3 \
+  --expand-s 5 \
+  --explain
 ```
 
 ---
@@ -1064,6 +1166,17 @@ curl \
 
 ---
 
+## Get Entities, Changes, Chapters, Receipt
+
+```bash
+curl http://localhost:8000/v1/videos/VIDEO_ID/entities
+curl http://localhost:8000/v1/videos/VIDEO_ID/changes
+curl http://localhost:8000/v1/videos/VIDEO_ID/chapters
+curl http://localhost:8000/v1/videos/VIDEO_ID/receipt
+```
+
+---
+
 # MCP Server
 
 VideoContext includes a Model Context Protocol server under:
@@ -1114,12 +1227,18 @@ flowchart LR
 The available tools are:
 
 ```text
+inspect_video
+
 search_video
 search_transcript
 search_ocr
 
 find_event
 find_object
+
+get_entities
+find_changes
+get_chapters
 
 get_segment
 get_frame
@@ -1253,6 +1372,59 @@ Ask a question about processed video context.
 ```
 
 The MCP server returns the answer together with evidence from the video context.
+
+---
+
+## `inspect_video`
+
+Describe a processed video: duration, fact counts per modality, stage statuses.
+
+```json
+{
+  "video_id": "VIDEO_ID"
+}
+```
+
+---
+
+## `get_entities`
+
+Timestamp-grounded entities with uncertainty flags.
+
+```json
+{
+  "video_id": "VIDEO_ID",
+  "top_k": 20
+}
+```
+
+---
+
+## `find_changes`
+
+What changed between adjacent regions, with evidence.
+
+```json
+{
+  "video_id": "VIDEO_ID"
+}
+```
+
+---
+
+## `get_chapters`
+
+Extractive chapters (titles are derived keywords, ranges are factual).
+
+```json
+{
+  "video_id": "VIDEO_ID"
+}
+```
+
+---
+
+All MCP tools cap result counts so agent context stays small and traceable.
 
 ---
 

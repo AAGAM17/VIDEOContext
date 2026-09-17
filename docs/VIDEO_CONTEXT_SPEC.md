@@ -384,6 +384,16 @@ A document is **valid** iff:
 
 ---
 
+## 16.1 Derived views (informative, not stored)
+
+Chapters, entities, changes, UI states, timelines, and context packages are
+**computed from a valid document, not stored in it**. This keeps the format stable
+while the intelligence layer evolves, and every derived object inherits the rules
+above: timestamps copied from stored facts, IDs referenceable, derived titles and
+labels always flagged (`inferred: true`, `ambiguous`, "derived" markings).
+
+---
+
 ## 17. Why these choices
 
 | Choice | Rationale |

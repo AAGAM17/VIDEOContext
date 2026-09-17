@@ -177,13 +177,39 @@ transcript and OCR ranks above either alone, and the `reason` string says so. Sp
 merged when adjacent, and every returned span is guaranteed to exist in the document —
 timestamps cannot be hallucinated because they are copied, never generated.
 
+Temporal questions go through an explicit planner (`videocontent.temporal` +
+`Retriever.query_temporal`): `before X` / `after X` / `between A and B` / `while X` /
+first occurrence resolve to an inspectable `TemporalQuery` plan plus evidence whose
+reasons name the temporal match. Plain queries are untouched by the planner.
+
+### Layer 4.5 — temporal intelligence (derived views, no reprocessing)
+
+Pure functions over the finished document — they relate facts, never extract new ones:
+
+- `videocontent.temporal`: interval relations (`relate`), clamped windows, cheap
+  change detection (scene/OCR/speech turnover), extractive chapters (titles always
+  `inferred=True`), UI states from stable on-screen text.
+- `videocontent.entities`: timestamp-grounded entities (ERROR/COMMAND from event
+  evidence, CONCEPT terms linked across modalities on co-occurrence) with explicit
+  confidence and `ambiguous` flags. Single mentions are sightings, not entities.
+- `videocontent.collection`: multi-video search with per-video provenance
+  (`video_id` on every span) and evidence-based comparison. Collections never merge files.
+- `videocontent.plans`: task → required stages with reasons, plus coverage checks
+  against a document. Plans are inspectable data; they never trigger processing.
+- `videocontent.routing` (context packages): query → retrieval → temporal expansion →
+  dedup → structural budgets (`max_spans`/`max_seconds`/`max_frames`) → token trim →
+  package. Every cut is recorded in `budget_notes`.
+
 ### Layer 5 — `videocontent.sdk` (the facade)
 
 ```python
 video = Video("lecture.mp4")   # lazy: nothing runs yet
 video.process()                # → VideoContextDocument (.vctx)
 video.search("pricing")        # → list[EvidenceSpan]
-video.ask("what was typed?")   # → Answer(text, confidence, evidence[])
+video.ask("what was typed?")   # → Answer(text, confidence, evidence[], trace)
+video.timeline(600, 900)       # → range lookup in timeline order
+video.entities()               # → linked, timestamped entities
+video.receipt()                # → how this context was generated
 ```
 
 Three methods for the common case; `ProcessingConfig` for everything else. The facade is
@@ -191,9 +217,14 @@ thin — it composes the layers below and holds no logic of its own.
 
 ### Layer 6 — surfaces
 
-- **CLI** (`videocontent`): `process · inspect · search · ask · export · benchmark · doctor`
-- **REST API** (`apps/api`, FastAPI): job-based; long work never blocks a request
-- **MCP server** (`apps/mcp`): agent tools over an existing `.vctx` — read-only by default
+- **CLI** (`videocontent`): `process · inspect · search · at · timeline · events ·
+  entities · changes · chapters · context · ask · source · benchmark · doctor · schema`
+  (`--json` everywhere; `--explain` on search/ask/context shows plans and traces)
+- **REST API** (`apps/api`, FastAPI): job-based; long work never blocks a request.
+  Read endpoints for timeline/segments/frames/entities/changes/chapters/receipt.
+- **MCP server** (`apps/mcp`): agent tools over an existing `.vctx` — read-only,
+  result-capped (`inspect_video · search_* · find_event/object · get_entities ·
+  find_changes · get_chapters · get_segment/frame/timeline · ask_video · context/profile`)
 - **Web demo** (`apps/web`, React+TS+Vite+Tailwind): upload → progress → explorer → search
 
 Surfaces are **peers**, all built on the SDK. None contains extraction logic.
@@ -307,7 +338,12 @@ src/videocontent/
 ├── sources/        source boundary: resolve · adapters · security · lifecycle
 ├── media/          ffmpeg boundary: probe, frames, audio
 ├── processing/     sampling · scenes · ocr · asr · vision · events · pipeline
-├── retrieval/      index · lexical · fusion · query
+├── retrieval/      index · lexical · fusion · query (+ temporal queries)
+├── temporal.py     relations · windows · changes · chapters · UI states
+├── entities.py     timestamped entities + cross-modal linking
+├── collection.py   multi-video index + comparison (no merging)
+├── plans.py        task → stages + coverage (inspectable, never auto-runs)
+├── routing/        task classification · context budgets · packaging
 ├── embeddings/     providers
 ├── storage/        object · artifact · metadata
 ├── cli/            typer commands

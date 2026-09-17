@@ -146,6 +146,8 @@ class Run:
     stage_times: dict[str, float] = field(default_factory=dict)
     source_ref: Any = None
     asset: Any = None
+    vision_tokens_in: int = 0
+    vision_tokens_out: int = 0
 
     def ran(self, name: str) -> bool:
         return any(r.name == name and r.ran for r in self.records)
@@ -630,7 +632,15 @@ class Pipeline:
             )
             for index, out in enumerate(outputs)
         ]
+        # Tokens the provider reports are measurable cost — record them, never invent them.
+        run.vision_tokens_in = sum(getattr(o, "tokens_in", 0) or 0 for o in outputs)
+        run.vision_tokens_out = sum(getattr(o, "tokens_out", 0) or 0 for o in outputs)
         fields = _provider_fields(provider)
+        counts: dict[str, int] = {"frames_described": len(selected), "notes": len(run.vision)}
+        if run.vision_tokens_in:
+            counts["tokens_in"] = run.vision_tokens_in
+        if run.vision_tokens_out:
+            counts["tokens_out"] = run.vision_tokens_out
         return StageResult(
             StageStatus.OK,
             **fields,
@@ -639,7 +649,7 @@ class Pipeline:
                 if not fields["remote"]
                 else [f"{len(selected)} frames were sent to {provider.name!r}"]
             ),
-            counts={"frames_described": len(selected), "notes": len(run.vision)},
+            counts=counts,
         )
 
     def _events(self, run: Run) -> StageResult:
@@ -825,6 +835,11 @@ class Pipeline:
     def _metrics(self, run: Run, elapsed: float) -> Metrics:
         duration = run.video.duration
         planned = run.plan.estimated_frames() if run.plan else 0
+        tokens: dict[str, int] = {}
+        if run.vision_tokens_in:
+            tokens["vision_input"] = run.vision_tokens_in
+        if run.vision_tokens_out:
+            tokens["vision_output"] = run.vision_tokens_out
         return Metrics(
             processing_time_s=round(elapsed, 3),
             video_duration_s=duration,
@@ -835,6 +850,7 @@ class Pipeline:
             # is floored rather than reported as a nonsense saving.
             frames_skipped=max(0, planned - len(run.frames)),
             stage_times=dict(run.stage_times),
+            tokens=tokens,
             cache_hits=sum(1 for r in run.records if r.cached),
         )
 

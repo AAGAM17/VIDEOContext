@@ -3,11 +3,15 @@
 Exposes video querying capabilities to AI agents via the Model Context Protocol.
 
 Tools:
+- inspect_video: Describe a processed video (metadata, modalities, counts)
 - search_video: Search across all modalities
 - search_transcript: Search speech only
 - search_ocr: Search on-screen text only
 - find_event: Find events by type
 - find_object: Find detected objects
+- get_entities: List timestamp-grounded entities with uncertainty
+- find_changes: Show what changed between adjacent regions
+- get_chapters: List extractive chapters (titles marked as derived)
 - get_segment: Get a segment by ID
 - get_frame: Get a frame by ID
 - get_timeline: Get timeline entries
@@ -31,6 +35,11 @@ from mcp.types import (
 
 from videocontent import load
 from videocontent.schema.v1 import VideoContextDocument
+from videocontent.timecode import format_timecode
+
+# Agent-facing caps: tools return minimal relevant context, never whole documents.
+_MAX_ITEMS = 30
+_MAX_TEXT = 200
 
 # Global document cache
 _docs: dict[str, VideoContextDocument] = {}
@@ -56,7 +65,15 @@ def _get_doc(video_id: str) -> VideoContextDocument:
 
 def _format_span(span) -> str:
     """Format a search span for display."""
-    return f"[{span.timecode}] ({span.modality}) {span.text[:200]}"
+    return f"[{span.timecode}] ({span.modality}) {span.text[:_MAX_TEXT]}"
+
+
+def _bounded(value: int, default: int) -> int:
+    """Clamp agent-supplied limits so one call cannot dump the whole document."""
+    try:
+        return max(1, min(int(value), _MAX_ITEMS))
+    except (TypeError, ValueError):
+        return default
 
 
 async def main():
@@ -65,6 +82,18 @@ async def main():
     @server.list_tools()
     async def list_tools() -> list[Tool]:
         return [
+            Tool(
+                name="inspect_video",
+                description="Describe a processed video: duration, modalities available, "
+                            "fact counts, processing stages. Call this first.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                    },
+                    "required": ["video_id"],
+                },
+            ),
             Tool(
                 name="search_video",
                 description="Search video content across all modalities (speech, on-screen text, vision, events)",
@@ -127,6 +156,44 @@ async def main():
                         "label": {"type": "string", "description": "Object label to find"},
                     },
                     "required": ["video_id", "label"],
+                },
+            ),
+            Tool(
+                name="get_entities",
+                description="List timestamp-grounded entities (errors, commands, linked "
+                            "concepts) with occurrence timestamps and uncertainty flags",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                        "top_k": {"type": "integer", "default": 20,
+                                  "description": "Max entities"},
+                    },
+                    "required": ["video_id"],
+                },
+            ),
+            Tool(
+                name="find_changes",
+                description="Show what changed between adjacent regions: text turnover, "
+                            "speech transitions, scene boundaries — with evidence",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                    },
+                    "required": ["video_id"],
+                },
+            ),
+            Tool(
+                name="get_chapters",
+                description="List extractive chapters. Titles are derived keywords "
+                            "(marked as such), ranges are factual.",
+                inputSchema={
+                    "type": "object",
+                    "properties": {
+                        "video_id": {"type": "string", "description": "Video ID"},
+                    },
+                    "required": ["video_id"],
                 },
             ),
             Tool(
@@ -227,9 +294,21 @@ async def main():
             doc = _get_doc(video_id)
             video = load(doc=doc)
 
+            if name == "inspect_video":
+                receipt = video.receipt()
+                lines = [
+                    f"duration: {doc.video.duration:.1f}s",
+                    f"modalities: " + ", ".join(
+                        f"{k}={v}" for k, v in receipt["modalities"].items()),
+                    "stages: " + ", ".join(
+                        f"{s['name']}:{s['status']}" for s in receipt["stages"]),
+                ]
+                return CallToolResult(content=[TextContent(
+                    type="text", text="Video context:\n" + "\n".join(lines))])
+
             if name == "search_video":
                 query = arguments.get("query", "")
-                top_k = arguments.get("top_k", 10)
+                top_k = _bounded(arguments.get("top_k", 10), 10)
                 modalities = arguments.get("modalities")
                 result = video.search(query, modalities=modalities, top_k=top_k)
                 hits = "\n".join(_format_span(h) for h in result.spans)
@@ -237,14 +316,14 @@ async def main():
 
             elif name == "search_transcript":
                 query = arguments.get("query", "")
-                top_k = arguments.get("top_k", 10)
+                top_k = _bounded(arguments.get("top_k", 10), 10)
                 result = video.search(query, modalities=["transcript"], top_k=top_k)
                 hits = "\n".join(_format_span(h) for h in result.spans)
                 return CallToolResult(content=[TextContent(type="text", text=f"Found {result.total} transcript matches:\n{hits}")])
 
             elif name == "search_ocr":
                 query = arguments.get("query", "")
-                top_k = arguments.get("top_k", 10)
+                top_k = _bounded(arguments.get("top_k", 10), 10)
                 result = video.search(query, modalities=["ocr"], top_k=top_k)
                 hits = "\n".join(_format_span(h) for h in result.spans)
                 return CallToolResult(content=[TextContent(type="text", text=f"Found {result.total} OCR matches:\n{hits}")])
@@ -254,7 +333,8 @@ async def main():
                 events = [e for e in doc.events if e.type == event_type]
                 if not events:
                     return CallToolResult(content=[TextContent(type="text", text=f"No events of type '{event_type}' found")])
-                lines = [f"[{e.timecode}] {e.description or e.type}" for e in events]
+                lines = [f"[{format_timecode(e.start)}] {e.description or e.type}"
+                         for e in events[:_MAX_ITEMS]]
                 return CallToolResult(content=[TextContent(type="text", text=f"Found {len(events)} events:\n" + "\n".join(lines))])
 
             elif name == "find_object":
@@ -295,15 +375,45 @@ async def main():
             elif name == "get_timeline":
                 start = arguments.get("start", 0)
                 end = arguments.get("end", doc.video.duration)
-                timeline = video.at(start, window=0).spans if start == end else video.search("", start=start, end=end).spans
-                entries = []
-                for span in timeline:
-                    entries.append(f"[{span.timecode}] ({span.modality}) {span.text[:200]}")
-                return CallToolResult(content=[TextContent(type="text", text=f"Timeline ({start:.1f}-{end:.1f}s):\n" + "\n".join(entries))])
+                top_k = _bounded(arguments.get("top_k", 30), 30)
+                result = video.timeline(start, end, top_k=top_k)
+                entries = [_format_span(span) for span in result.spans]
+                suffix = f"\n({result.total - len(result.spans)} more — narrow the range)" \
+                    if result.total > len(result.spans) else ""
+                return CallToolResult(content=[TextContent(type="text", text=f"Timeline ({start:.1f}-{end:.1f}s):\n" + "\n".join(entries) + suffix)])
+
+            elif name == "get_entities":
+                top_k = _bounded(arguments.get("top_k", 20), 20)
+                entities = video.entities()[:top_k]
+                if not entities:
+                    return CallToolResult(content=[TextContent(type="text", text="No entities found")])
+                lines = []
+                for e in entities:
+                    seen = format_timecode(e.first_seen) if e.first_seen is not None else "?"
+                    flag = " (uncertain)" if e.ambiguous else ""
+                    lines.append(f"{e.name} [{e.type}]{flag} first seen {seen} "
+                                 f"×{len(e.occurrences)} [{','.join(e.linked_modalities)}]")
+                return CallToolResult(content=[TextContent(type="text", text="Entities:\n" + "\n".join(lines))])
+
+            elif name == "find_changes":
+                changes = video.changes()[:_MAX_ITEMS]
+                if not changes:
+                    return CallToolResult(content=[TextContent(type="text", text="No changes detected")])
+                lines = [f"[{format_timecode(c.ts)}] {c.change_type}: "
+                         f"{c.before[:120]} → {c.after[:120]}" for c in changes]
+                return CallToolResult(content=[TextContent(type="text", text="Changes:\n" + "\n".join(lines))])
+
+            elif name == "get_chapters":
+                chapters = video.chapters()
+                if not chapters:
+                    return CallToolResult(content=[TextContent(type="text", text="No chapters")])
+                lines = [f"[{format_timecode(c.start)} → {format_timecode(c.end)}] "
+                         f"{c.title} (derived title)" for c in chapters]
+                return CallToolResult(content=[TextContent(type="text", text="Chapters:\n" + "\n".join(lines))])
 
             elif name == "ask_video":
                 question = arguments.get("question", "")
-                top_k = arguments.get("top_k", 5)
+                top_k = _bounded(arguments.get("top_k", 5), 5)
                 answer = video.ask(question, top_k=top_k)
                 evidence = "\n".join(_format_span(e) for e in answer.evidence)
                 return CallToolResult(content=[TextContent(type="text", text=f"Q: {answer.question}\nA: {answer.answer}\nConfidence: {answer.confidence:.0%}\n\nEvidence:\n{evidence}")])

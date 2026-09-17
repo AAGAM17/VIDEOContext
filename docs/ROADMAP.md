@@ -76,14 +76,35 @@ The point at which VideoContext becomes useful to an *application*, not just a d
 
 ## V1.0 — Production
 
-- ⬜ Temporal reasoning queries: "what changed between 10:00 and 20:00", before/after
-      comparison, first/last occurrence, co-occurrence across modalities
+- 🚧 Temporal reasoning queries: `before`/`after`/`between`/first-occurrence/
+  co-occurrence implemented and tested (explicit planner, no NLP framework);
+  last-occurrence and cross-video temporal joins still planned
 - ⬜ Multimodal embeddings (joint text+frame space)
 - ⬜ Storage backends: S3, PostgreSQL, Redis; retention + deletion APIs
 - ⬜ Multi-tenancy: isolation, auth, quotas, audit logs
 - ⬜ Horizontal workers with shard-by-time processing for long videos
 - ⬜ Advanced CV plugins: faces, tracking, pose, actions, logos, charts/tables, slides
 - ⬜ Stability guarantee on `.vctx` v1.x and the SDK surface
+
+---
+
+## Intelligence layer — shipped (this phase)
+
+- ✅ Temporal core: interval relations, clamped windows, cheap change detection,
+  extractive chapters (derived titles), UI states from stable OCR
+- ✅ Entities: ERROR/COMMAND from event evidence, CONCEPT terms linked across
+  modalities on co-occurrence, explicit uncertainty
+- ✅ Retrieval: temporal query planning with inspectable plans, range timelines,
+  per-span reasons everywhere, collection index + evidence-based comparison
+- ✅ Context packages: expansion → dedup → structural budgets → token trim,
+  every cut recorded in `budget_notes`; query-biased frame selection
+- ✅ Traceability: `Answer.trace` (plan/executor/retrieval/LLM/outcome),
+  processing receipts, vision token accounting in metrics
+- ✅ Surfaces: CLI (`timeline/events/entities/changes/chapters/context`,
+  `--explain`), MCP (`inspect_video/get_entities/find_changes/get_chapters`,
+  capped outputs), API (`/entities/changes/chapters/receipt`; fixed
+  `load(doc=...)` call sites), repaired `jobs` package imports
+- ✅ Tests with every feature (unit + CLI + API); docs describe behavior only
 
 ---
 

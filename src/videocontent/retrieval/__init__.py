@@ -12,7 +12,7 @@ The public surface is :func:`search`, :func:`at` and :class:`Retriever`; the mod
 from __future__ import annotations
 
 from .index import MODALITIES, Record, build_records
-from .query import EvidenceSpan, Retriever, SearchResult, at, search
+from .query import EvidenceSpan, Retriever, SearchResult, at, query_temporal, search, timeline
 
 __all__ = [
     "MODALITIES",
@@ -22,5 +22,7 @@ __all__ = [
     "SearchResult",
     "at",
     "build_records",
+    "query_temporal",
     "search",
+    "timeline",
 ]

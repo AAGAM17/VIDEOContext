@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import tempfile
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from pathlib import Path
 from typing import Any, Optional
 
-from ...config import ProcessingConfig, load_config
-from ...logging import get_logger
-from ...sdk import Video
+from ..config import ProcessingConfig, load_config
+from ..logging import get_logger
+from ..sdk import Video
 
 log = get_logger("jobs.queue")
 
@@ -186,7 +188,6 @@ async def process_job(job: Job, redis_url: str) -> None:
         queue.update_job(job.id, progress=0.8)
 
         # Save result
-        import tempfile
         output_dir = Path(tempfile.gettempdir()) / "videocontent_outputs"
         output_dir.mkdir(exist_ok=True)
         output_path = output_dir / f"{job.id}.vctx"

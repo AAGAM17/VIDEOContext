@@ -108,6 +108,18 @@ duplicated per surface):
 When reporting a remote-ingestion issue, include the (redacted) URL shape, redirect
 chain, headers, and which control failed — never live credentials or signed URLs.
 
+## Agent and API Exposure
+
+New read surfaces in this phase (MCP tools, REST endpoints, CLI commands) operate
+exclusively over finished local `.vctx` documents:
+
+* No tool downloads video, runs processing, or contacts providers — the LLM call
+  inside `ask` uses the operator's configured provider exactly as the SDK does.
+* MCP outputs are capped (counts and text lengths) so one call cannot exfiltrate
+  a whole document into an agent context window.
+* Derived views (entities, chapters, changes) inherit document timestamps; derived
+  titles/labels are flagged rather than presented as ground truth.
+
 ## Dependencies
 
 VIDEOContext may depend on third-party libraries and external tools for media processing, AI functionality, or other features.

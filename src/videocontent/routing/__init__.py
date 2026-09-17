@@ -47,13 +47,27 @@ class TaskClassification:
 
 @dataclass
 class ContextBudget:
-    """Token budget for context selection."""
+    """Budgets for context selection — relevance vs cost vs completeness.
+
+    ``None`` means unbounded for that dimension (token trim still applies).
+    """
+
     max_tokens: int = 4000
     reserve_tokens: int = 500  # For system prompt, etc.
+    max_spans: int | None = None
+    max_seconds: float | None = None
+    max_frames: int | None = None
 
     @property
     def available_tokens(self) -> int:
         return max(0, self.max_tokens - self.reserve_tokens)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "max_tokens": self.max_tokens, "reserve_tokens": self.reserve_tokens,
+            "max_spans": self.max_spans, "max_seconds": self.max_seconds,
+            "max_frames": self.max_frames,
+        }
 
 
 @dataclass
@@ -224,8 +238,17 @@ def select_context(
     task: TaskClassification,
     budget: ContextBudget,
     query: str | None = None,
+    *,
+    expand_s: float = 0.0,
+    modalities: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Select optimal context for the task within token budget."""
+    """Select optimal context for the task within budget.
+
+    ``expand_s`` pulls bounded temporal neighborhoods around each evidence span
+    (a match for "here is the problem" also fetches the error that appears
+    seconds later). Expansion is merged, deduplicated, and still subject to the
+    budget — it never silently inflates context.
+    """
     from ..profiles import get_profile_builder, ProfileContext
 
     selection = {
@@ -235,6 +258,7 @@ def select_context(
         "global_context": None,
         "summaries": {},
         "token_estimate": 0,
+        "budget_notes": [],
     }
 
     profile_ctx = ProfileContext(doc=doc)
@@ -251,12 +275,19 @@ def select_context(
 
     # 2. Get evidence if needed
     if task.requires_evidence and query:
-        evidence_result: SearchResult = search(doc, query, top_k=10)
-        selection["evidence"] = evidence_result.spans
+        evidence_result: SearchResult = search(doc, query, top_k=10, modalities=modalities)
+        selection["evidence"] = list(evidence_result.spans)
+        if expand_s > 0 and selection["evidence"]:
+            extra = expand_evidence(doc, selection["evidence"], expand_s)
+            if extra:
+                selection["evidence"] = dedupe_spans(
+                    [*selection["evidence"], *extra])
+                selection["budget_notes"].append(
+                    f"temporal expansion ±{expand_s:g}s added {len(extra)} spans")
 
     # 3. Select representative frames if needed
     if task.requires_frames:
-        selection["frames"] = select_representative_frames(doc, max_frames=10)
+        selection["frames"] = select_representative_frames(doc, max_frames=10, query=query)
 
     # 4. Get global context if needed
     if task.requires_global:
@@ -265,16 +296,97 @@ def select_context(
     # 5. Get multi-level summaries
     selection["summaries"] = get_summaries(doc)
 
+    # 6. Enforce structural budgets, then tokens.
+    selection = enforce_budgets(selection, budget)
+
     # 6. Estimate tokens and trim if needed
     selection["token_estimate"] = estimate_tokens(selection)
     if selection["token_estimate"] > budget.available_tokens:
+        before = selection["token_estimate"]
         selection = trim_to_budget(selection, budget)
+        selection["budget_notes"].append(
+            f"token trim {before} → {selection['token_estimate']} "
+            f"(budget {budget.available_tokens})")
 
     return selection
 
 
-def select_representative_frames(doc: VideoContextDocument, max_frames: int = 10) -> list[dict[str, Any]]:
-    """Select the most representative frames."""
+def expand_evidence(doc: VideoContextDocument, spans: list[Any], radius: float) -> list[Any]:
+    """Facts co-occurring in each span's neighborhood, as evidence spans.
+
+    Windows merge first so clustered matches expand once, not N times. Every
+    returned span names its source fact and the match it expands.
+    """
+    from ..temporal import merge_windows, window_around
+
+    duration = doc.video.duration
+    windows = merge_windows([window_around(s.start, s.end, radius, duration) for s in spans])
+    out: list[Any] = []
+    for window in windows:
+        for modality, items in doc.window(window.start, window.end).items():
+            if modality == "segments":
+                continue  # derived projection, not primary evidence
+            for item in items:
+                out.append(EvidenceSpan(
+                    start=item.start, end=item.end, modality=modality,
+                    text=getattr(item, "text", None) or getattr(item, "description", "")
+                    or modality,
+                    score=0.5, ref_ids=(item.id,), segment_ids=(),
+                    matched_terms=(),
+                    reason=f"co-occurs within ±{radius:g}s of evidence",
+                    confidence=getattr(item, "confidence", None),
+                    language=getattr(item, "language", None),
+                    kind=getattr(item, "type", None),
+                ))
+    return out
+
+
+def dedupe_spans(spans: list[Any]) -> list[Any]:
+    """Drop exact duplicates by (modality, references), keeping rank order."""
+    seen: set[tuple[Any, ...]] = set()
+    out: list[Any] = []
+    for span in spans:
+        key = (span.modality, tuple(span.ref_ids))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(span)
+    return out
+
+
+def enforce_budgets(selection: dict[str, Any], budget: ContextBudget) -> dict[str, Any]:
+    """Apply structural caps (spans/seconds/frames), recording what was cut."""
+    notes: list[str] = selection.setdefault("budget_notes", [])
+    if budget.max_spans is not None and len(selection["evidence"]) > budget.max_spans:
+        cut = len(selection["evidence"]) - budget.max_spans
+        selection["evidence"] = selection["evidence"][:budget.max_spans]
+        notes.append(f"max_spans={budget.max_spans} dropped {cut} spans")
+    if budget.max_seconds is not None:
+        kept: list[Any] = []
+        covered = 0.0
+        for span in selection["evidence"]:
+            span_s = max(0.0, span.end - span.start)
+            if kept and covered + span_s > budget.max_seconds:
+                continue
+            kept.append(span)
+            covered += span_s
+        if len(kept) != len(selection["evidence"]):
+            notes.append(f"max_seconds={budget.max_seconds:g} kept {len(kept)} spans")
+        selection["evidence"] = kept
+    if budget.max_frames is not None and len(selection["frames"]) > budget.max_frames:
+        cut = len(selection["frames"]) - budget.max_frames
+        selection["frames"] = selection["frames"][:budget.max_frames]
+        notes.append(f"max_frames={budget.max_frames} dropped {cut} frames")
+    return selection
+
+
+def select_representative_frames(doc: VideoContextDocument, max_frames: int = 10,
+                                 query: str | None = None) -> list[dict[str, Any]]:
+    """Select the most representative frames.
+
+    ``query`` optionally biases toward frames whose overlapping OCR/vision text
+    shares terms with it — None preserves the query-independent ranking.
+    """
     if not doc.frames:
         return []
 
@@ -311,6 +423,14 @@ def select_representative_frames(doc: VideoContextDocument, max_frames: int = 10
         ocr_notes = [o for o in doc.ocr if o.first_frame_ts and o.first_frame_ts <= frame.ts <= (o.last_frame_ts or float('inf'))]
         if ocr_notes:
             score += 2
+
+        # Optional bias: frames showing query-relevant text rank higher.
+        if query:
+            terms = {t.lower() for t in query.split() if len(t) > 2}
+            haystack = " ".join(
+                [o.text for o in ocr_notes]
+                + [v.description for v in vision_notes]).lower()
+            score += 2 * sum(1 for t in terms if t in haystack)
 
         scored_frames.append((score, frame))
 
@@ -545,12 +665,15 @@ __all__ = [
     "ContextBudget",
     "ContextSelection",
     "classify_task",
-    "select_context",
-    "select_representative_frames",
+    "dedupe_spans",
+    "enforce_budgets",
+    "estimate_tokens",
+    "expand_evidence",
+    "format_profile",
     "get_global_context",
     "get_summaries",
-    "estimate_tokens",
-    "trim_to_budget",
     "pack_context",
-    "format_profile",
+    "select_context",
+    "select_representative_frames",
+    "trim_to_budget",
 ]
