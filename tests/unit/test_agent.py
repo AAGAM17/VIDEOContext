@@ -232,8 +232,6 @@ class TestChains:
         assert chains[0].to_dict()["change"]["evidence_ids"]
 
     def test_ui_timeline(self):
-        from videocontent.temporal import ui_timeline
-
         entries = ui_timeline(sample())
         assert entries and entries == sorted(entries, key=lambda e: (e["ts"], e["kind"]))
         assert {e["kind"] for e in entries} >= {"state", "change"}
@@ -300,6 +298,16 @@ class TestPackages:
         assert "REDACTED" in scrubbed.entities[0]["name"]
         assert "admin@example.com" in package.entities[0]["name"], "input untouched"
         assert any("redacted" in w for w in scrubbed.warnings)
+
+    def test_redaction_frozen_spans(self):
+        from videocontent.retrieval import EvidenceSpan
+
+        span = EvidenceSpan(start=1.0, end=2.0, modality="ocr",
+                            text="contact admin@example.com today", score=1.0)
+        package = ContextPackage(query="q", evidence=[span])
+        scrubbed = redact_package(package, builtin_secret_patterns())
+        assert scrubbed.evidence[0].text == "contact [REDACTED] today"
+        assert package.evidence[0].text == "contact admin@example.com today"
 
 
 class TestSearchGraph:

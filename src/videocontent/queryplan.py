@@ -16,7 +16,7 @@ from typing import Any
 
 from .entities import candidate_terms, extract_entities, normalize_name
 from .logging import get_logger
-from .temporal import TemporalQuery, parse_temporal_query
+from .temporal import TemporalQuery, TemporalRelation, parse_temporal_query
 
 log = get_logger("queryplan")
 
@@ -192,8 +192,6 @@ def _intent_for(query: str, temporal: TemporalQuery) -> Intent:
     if any(cue in lowered for cue in _SUMMARY_CUES):
         return Intent.GENERAL_SUMMARY
     if temporal.relation is not None:
-        from .temporal import TemporalRelation
-
         if temporal.relation is TemporalRelation.BEFORE:
             return Intent.TEMPORAL_BEFORE
         if temporal.relation is TemporalRelation.AFTER:

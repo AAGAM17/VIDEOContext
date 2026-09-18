@@ -13,6 +13,9 @@ Redaction is opt-in, pattern-based, and non-destructive (originals preserved).
 
 from __future__ import annotations
 
+import contextlib
+import copy
+import dataclasses
 import json
 import re
 from dataclasses import dataclass, field
@@ -128,7 +131,7 @@ def optimize_evidence(spans: list[Any], *, max_spans: int | None = None) -> tupl
     Anchor preservation: modalities present in the input keep at least one span
     whenever the cap allows; anything dropped is recorded in ``omitted``.
     """
-    from .routing import dedupe_spans
+    from .routing import dedupe_spans  # deferred: routing pulls the profile stack
 
     spans = dedupe_spans(list(spans))
     # Drop spans fully contained in a higher-score span of the same modality.
@@ -205,6 +208,7 @@ def build_package(doc: Any, query: str, spans: list[Any], *,
     omitted = omitted_spans + omitted_frames
     video = getattr(doc, "video", None)
     source = getattr(doc, "source", None)
+    producer = getattr(doc, "producer", None)
     package = ContextPackage(
         query=query,
         evidence=evidence,
@@ -224,10 +228,10 @@ def build_package(doc: Any, query: str, spans: list[Any], *,
         frames=kept_frames,
         graph_summary=graph_summary or {},
         provenance={
-            "producer": getattr(getattr(doc, "producer", None), "model_dump",
-                                lambda **_: None)(mode="json")
-            if getattr(doc, "producer", None) else None,
-            "source": source.model_dump(mode="json") if source is not None else None,
+            "producer": producer.model_dump(mode="json")
+            if producer is not None and hasattr(producer, "model_dump") else None,
+            "source": source.model_dump(mode="json")
+            if source is not None and hasattr(source, "model_dump") else None,
             "stages": [(s.name, s.status.value if hasattr(s.status, "value") else s.status)
                        for s in getattr(doc, "stages", [])],
         },
@@ -266,15 +270,20 @@ def redact_package(package: ContextPackage,
 
     The input package is never mutated; ``warnings`` records that redaction ran.
     """
-    import copy
-
     clone = copy.deepcopy(package)
+    redacted_spans: list[Any] = []
     for span in clone.evidence:
-        if hasattr(span, "text"):
-            try:
-                span.text = redact_text(span.text, patterns)
-            except (AttributeError, TypeError):
-                pass
+        text = getattr(span, "text", None)
+        if isinstance(text, str):
+            scrubbed = redact_text(text, patterns)
+            params = getattr(span, "__dataclass_params__", None)
+            if params is not None and params.frozen:
+                span = dataclasses.replace(span, text=scrubbed)
+            else:
+                with contextlib.suppress(AttributeError, TypeError):
+                    span.text = scrubbed
+        redacted_spans.append(span)
+    clone.evidence = redacted_spans
     for element_list in (clone.entities, clone.events, clone.changes):
         for item in element_list:
             if isinstance(item, dict):

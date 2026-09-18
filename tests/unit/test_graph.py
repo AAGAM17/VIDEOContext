@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from videocontent.graph import RELATIONS, build_graph
 from videocontent.schema.v1 import (
     Event,
@@ -68,7 +66,7 @@ class TestNodes:
         kinds = {node.kind for node in graph.node_list()}
         assert {"transcript", "ocr", "event", "scene", "segment"} <= kinds
         assert "entity" in kinds  # ConnectionError links ocr + transcript
-        assert "change" in kinds or True
+        assert "change" in kinds  # disjoint OCR across the scene boundary
         facts = [n for n in graph.node_list() if n.observed]
         derived = [n for n in graph.node_list() if not n.observed]
         assert facts and derived

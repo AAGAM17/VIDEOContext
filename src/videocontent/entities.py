@@ -9,6 +9,7 @@ uncertainty is explicit (``confidence`` + ``ambiguous``) rather than averaged aw
 
 from __future__ import annotations
 
+import difflib
 import re
 from dataclasses import dataclass, field
 from typing import Any
@@ -236,11 +237,9 @@ def _merge_mentions(mentions: dict[str, dict[str, Any]],
     ("Postgres" vs "Postgress") — still gated on temporal proximity, so distant
     lookalikes never merge.
 
-    Returns ``(display, occurrences)`` per group; display is the longest variant,
+    Returns ``(display, occurrences)`` per group;     display is the longest variant,
     which is the most informative ("Stripe API Dashboard", not "Stripe").
     """
-    import difflib
-
     keys = list(mentions)
     parent = {k: k for k in keys}
 

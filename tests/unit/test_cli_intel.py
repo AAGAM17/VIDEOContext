@@ -64,6 +64,26 @@ class TestIntelCommands:
         assert result.exit_code == 0, result.output
         assert json.loads(result.output)["events"] == []
 
+    def test_events_text_path(self, tmp_path):
+        # Regression: the human-readable path crashed (missing limit arg) and
+        # ignored --type. Seed doc needs at least one event for this.
+        from videocontent.schema.v1 import Event
+
+        target = tmp_path / "ev.vctx"
+        d = seed_doc()
+        d.events = [Event(id="evt_0000", type="error_shown", start=120.0, end=128.0,
+                          description="boom", refs={"ocr": ["ocr_0001"]}),
+                    Event(id="evt_0001", type="text_appeared", start=4.0, end=4.0,
+                          description="hi", refs={"ocr": ["ocr_0000"]})]
+        sio.save(d, target)
+        result = runner.invoke(app, ["events", str(target)])
+        assert result.exit_code == 0, result.output
+        assert "2 events" in result.output
+        filtered = runner.invoke(app, ["events", str(target), "--type", "error_shown"])
+        assert filtered.exit_code == 0, filtered.output
+        assert "1 events" in filtered.output
+        assert "text_appeared" not in filtered.output
+
     def test_entities(self, vctx_file):
         result = runner.invoke(app, ["entities", str(vctx_file), "--json"])
         assert result.exit_code == 0, result.output

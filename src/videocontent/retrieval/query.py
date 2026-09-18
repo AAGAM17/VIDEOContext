@@ -30,13 +30,21 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterator, Sequence
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from typing import Any
 
 from ..config import RetrievalConfig
+from ..entities import candidate_terms, extract_entities, normalize_name
+from ..graph import build_graph
 from ..logging import get_logger
 from ..schema.v1 import VideoContextDocument
-from ..temporal import TemporalQuery, TemporalRelation, parse_temporal_query
+from ..temporal import (
+    TemporalQuery,
+    TemporalRelation,
+    merge_windows,
+    parse_temporal_query,
+    window_around,
+)
 from ..timecode import format_span, format_timecode
 from .fusion import Candidate, boost_cooccurrence, merge_adjacent, rrf
 from .index import MODALITIES, Record, build_records
@@ -467,9 +475,7 @@ class Retriever:
         limit = config.top_k if top_k is None else top_k
         plan = parse_temporal_query(question)
         if expand_s != 5.0:
-            import dataclasses
-
-            plan = dataclasses.replace(plan, radius_s=expand_s)
+            plan = replace(plan, radius_s=expand_s)
         if not plan.is_temporal:
             return plan, self.search(question, modalities=modalities, top_k=top_k)
 
@@ -642,14 +648,11 @@ class Retriever:
         carries a reason naming the rule; every score is labeled measured or
         heuristic in the explanation.
         """
-        from ..entities import candidate_terms, extract_entities, normalize_name
-        from ..graph import build_graph
-
         began = time.perf_counter()
         config = self.config
         limit = config.top_k if top_k is None else top_k
         parsed = plan if plan is not None else parse_temporal_query(query)
-        base_plan, base = self.query_temporal(query, modalities=modalities, top_k=top_k)
+        _, base = self.query_temporal(query, modalities=modalities, top_k=top_k)
         temporal_ops = tuple(base.notes) if parsed.is_temporal else ()
 
         # Entity matches: query terms resolving to extracted entities.
@@ -826,8 +829,6 @@ class Retriever:
         limit: int,
     ) -> tuple[EvidenceSpan, ...]:
         """Each match plus the facts co-occurring in its neighborhood, deduped."""
-        from ..temporal import merge_windows, window_around
-
         selected = self._selected(modalities)
         duration = self.doc.video.duration
         windows = merge_windows([window_around(s.start, s.end, radius, duration) for s in spans])
@@ -951,5 +952,13 @@ def query_temporal(
     return Retriever(doc, config).query_temporal(question, **kw)
 
 
-__all__ = ["EvidenceSpan", "Retriever", "SearchResult", "at", "query_temporal", "search",
-           "timeline"]
+__all__ = [
+    "EvidenceSpan",
+    "RetrievalExplanation",
+    "Retriever",
+    "SearchResult",
+    "at",
+    "query_temporal",
+    "search",
+    "timeline",
+]

@@ -549,7 +549,7 @@ def events(
         return
     doc = video.document
     console.print(render.bold(f"{len(matched)} events"))
-    console.print(render.events_table(doc))
+    console.print(render.events_table(doc, events=matched))
 
 
 @app.command()

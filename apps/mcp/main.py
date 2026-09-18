@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,7 @@ from mcp.types import (
 )
 
 from videocontent import load
+from videocontent.collection import CollectionIndex, compare
 from videocontent.schema.v1 import VideoContextDocument
 from videocontent.sdk import Video
 from videocontent.timecode import format_timecode
@@ -82,8 +84,6 @@ def _bounded(value: int, default: int) -> int:
 
 def _gap_of(span, word: str) -> float | None:
     """Gap seconds parsed from a before/after reason; None when absent."""
-    import re
-
     match = re.search(r"(ends|starts) ([\d.]+)s (before|after)", span.reason or "")
     if match and match.group(3) == word:
         try:
@@ -484,8 +484,6 @@ async def main():
                     type="text",
                     text="Error: give 2+ video_ids or a registered collection_id")])
             try:
-                from videocontent.collection import CollectionIndex
-
                 docs = {vid: _get_doc(vid) for vid in video_ids}
                 result = CollectionIndex(docs).search(query, top_k=top_k)
                 lines = [f"[{s.video_id} {s.timecode}] ({s.modality}) "
@@ -785,8 +783,6 @@ async def main():
                 except ValueError as exc:
                     return CallToolResult(content=[TextContent(
                         type="text", text=f"Error: {exc}")])
-                from videocontent.collection import compare
-
                 result = compare(video_id, doc, other_id, other_doc)
                 lines = [f"added in {other_id}: {', '.join(result.added[:10]) or '—'}",
                          f"removed: {', '.join(result.removed[:10]) or '—'}",

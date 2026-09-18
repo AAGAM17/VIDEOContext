@@ -15,7 +15,9 @@ from typing import Any
 
 from .entities import extract_entities, normalize_name
 from .logging import get_logger
+from .packages import build_package
 from .retrieval.query import EvidenceSpan, Retriever
+from .temporal import build_chapters, detect_changes, ui_states
 
 log = get_logger("collection")
 
@@ -61,10 +63,18 @@ class CollectionIndex:
     def __init__(self, docs: Mapping[str, Any]) -> None:
         self._docs = dict(docs)
         self._retrievers = {vid: Retriever(doc) for vid, doc in self._docs.items()}
+        self._entities: dict[str, list[Any]] | None = None
 
     @property
     def video_ids(self) -> list[str]:
         return list(self._docs)
+
+    def _entities_for(self, video_id: str) -> list[Any]:
+        """Entities per video, extracted once and memoized (pure over the doc)."""
+        if self._entities is None:
+            self._entities = {vid: extract_entities(doc)
+                              for vid, doc in self._docs.items()}
+        return self._entities[video_id]
 
     def search(
         self,
@@ -100,8 +110,8 @@ class CollectionIndex:
     def entities(self) -> dict[str, dict[str, Any]]:
         """Aggregate entities per video: ``{video_id: {name: entity dict}}``."""
         return {video_id: {entity.name: entity.to_dict()
-                           for entity in extract_entities(doc)}
-                for video_id, doc in self._docs.items()}
+                           for entity in self._entities_for(video_id)}
+                for video_id in self._docs}
 
     def link_entities(self) -> dict[str, list[dict[str, Any]]]:
         """Collection-level identity over video-local evidence.
@@ -110,8 +120,8 @@ class CollectionIndex:
         provenance stay attached to each entry; nothing is merged away.
         """
         linked: dict[str, list[dict[str, Any]]] = {}
-        for video_id, doc in self._docs.items():
-            for entity in extract_entities(doc):
+        for video_id in self._docs:
+            for entity in self._entities_for(video_id):
                 linked.setdefault(normalize_name(entity.name), []).append(
                     {"video_id": video_id, "entity": entity.to_dict()})
         return linked
@@ -120,8 +130,8 @@ class CollectionIndex:
         """Every occurrence of ``name`` across videos, in (video, time) order."""
         key = normalize_name(name)
         out: list[dict[str, Any]] = []
-        for video_id, doc in self._docs.items():
-            for entity in extract_entities(doc):
+        for video_id in self._docs:
+            for entity in self._entities_for(video_id):
                 if normalize_name(entity.name) != key:
                     continue
                 for occurrence in entity.timeline():
@@ -131,8 +141,8 @@ class CollectionIndex:
 
     def videos_with(self, *names: str) -> dict[str, list[str]]:
         """Which videos contain each name — answers 'which videos contain X?'."""
-        return {name: sorted({video_id for video_id, doc in self._docs.items()
-                              for entity in extract_entities(doc)
+        return {name: sorted({video_id for video_id in self._docs
+                              for entity in self._entities_for(video_id)
                               if normalize_name(entity.name) == normalize_name(name)})
                 for name in names}
 
@@ -156,8 +166,6 @@ class CollectionIndex:
 
     def changes(self) -> dict[str, list[dict[str, Any]]]:
         """Changes per video — 'how did X change across recordings' starts here."""
-        from .temporal import detect_changes
-
         return {video_id: [c.to_dict() for c in detect_changes(doc)]
                 for video_id, doc in self._docs.items()}
 
@@ -192,8 +200,6 @@ class CollectionIndex:
         Searches each member, merges by score, then optimizes once globally so
         the budget binds the whole answer, not each video separately.
         """
-        from .packages import build_package
-
         result = self.search(task, top_k=max_spans * 2, per_video_k=per_video_k)
         return build_package(
             _CollectionDoc(self._docs), task, list(result.spans),
@@ -268,8 +274,6 @@ def _coverage(doc: Any) -> dict[str, int]:
 
 
 def _structure(doc: Any) -> dict[str, int]:
-    from .temporal import build_chapters, detect_changes, ui_states
-
     return {
         "chapters": len(build_chapters(doc)),
         "changes": len(detect_changes(doc)),

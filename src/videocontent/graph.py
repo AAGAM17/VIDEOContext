@@ -339,8 +339,9 @@ def build_graph(doc: Any, *, max_nodes: int = 5000, max_edges: int = 20000,
                      f"detectors ({first.method} vs {second.method}); kept separate, "
                      f"linked as the same concept", (first.id, second.id))
 
-    # Changes, chapters, states.
-    for change in detect_changes(doc):
+    # Changes, chapters, states (each derived view computed once and reused).
+    changes = detect_changes(doc)
+    for change in changes:
         if not graph._add_node(Node(change.id, "change", change.ts, change.ts,
                                     f"{change.change_type}: {change.before[:60]} → "
                                     f"{change.after[:60]}", change.evidence_ids, False),
@@ -371,7 +372,7 @@ def build_graph(doc: Any, *, max_nodes: int = 5000, max_edges: int = 20000,
                 edge(state.id, ref, "SUPPORTS", 1.0,
                      f"{ref} is cited in {state.id}.evidence_ids: the state is defined "
                      f"by that on-screen text", (ref,))
-    for change in detect_changes(doc):
+    for change in changes:
         if change.id not in graph.nodes:
             continue
         for state in states:
@@ -405,4 +406,4 @@ def build_graph(doc: Any, *, max_nodes: int = 5000, max_edges: int = 20000,
     return graph
 
 
-__all__ = ["Edge", "Node", "RELATIONS", "EvidenceGraph", "build_graph"]
+__all__ = ["RELATIONS", "Edge", "EvidenceGraph", "Node", "build_graph"]

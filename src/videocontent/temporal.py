@@ -18,7 +18,7 @@ from itertools import pairwise
 from typing import Any
 
 from .logging import get_logger
-from .timecode import format_timecode
+from .timecode import format_timecode, parse_timecode
 
 log = get_logger("temporal")
 
@@ -392,7 +392,7 @@ def _app_hint(elements: tuple[str, ...]) -> tuple[str | None, float | None]:
 def _layout_signature(active: list[Any]) -> str:
     """Coarse observed layout: element count + text-position buckets.
 
-    Uses OCR bboxes when present (3×3 grid cells), else text-length buckets.
+    Uses OCR bboxes when present (3-by-3 grid cells), else text-length buckets.
     Two screens with the same signature merely look alike — it is a grouping
     key, not an identity.
     """
@@ -645,8 +645,6 @@ _QUESTION_LEAD_RE = re.compile(
 
 
 def _tc_to_seconds(text: str) -> float:
-    from .timecode import parse_timecode
-
     return parse_timecode(text)
 
 

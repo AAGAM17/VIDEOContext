@@ -826,6 +826,7 @@ def process(
 __all__ = [
     "VCTX_SUFFIX",
     "Answer",
+    "AnswerTrace",
     "NotProcessedError",
     "OptimizedContext",
     "Video",

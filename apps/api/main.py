@@ -39,7 +39,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from videocontent.config import ProcessingConfig, load_config
-from videocontent.sdk import Video, load, process
+from videocontent.sdk import Video
 from videocontent.schema.v1 import VideoContextDocument
 
 # In-memory job store (replace with Redis in production)

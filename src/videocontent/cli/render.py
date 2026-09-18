@@ -306,9 +306,10 @@ def scenes_table(doc: VideoContextDocument, limit: int | None) -> Table:
     return table
 
 
-def events_table(doc: VideoContextDocument, limit: int | None) -> Table:
+def events_table(doc: VideoContextDocument, limit: int | None = None,
+                 events: list[Any] | None = None) -> Table:
     table = _facts_table("TYPE", "DESCRIPTION", "REFS")
-    for item in _clip(doc.events, limit):
+    for item in _clip(events if events is not None else doc.events, limit):
         refs = " ".join(f"{kind}:{len(ids)}" for kind, ids in sorted(item.refs.items()))
         table.add_row(
             format_span(item.start, item.end),
