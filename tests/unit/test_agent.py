@@ -260,6 +260,12 @@ class TestPackages:
         assert package.to_markdown().startswith("# Context")
         assert package.to_json()
 
+    def test_empty_ranges_guard(self):
+        from videocontent.packages import relevant_ranges_for
+
+        assert relevant_ranges_for([], 100.0) == []
+        assert relevant_ranges_for(self._spans(sample()), 0.0) == []
+
     def test_optimize_preserves_anchors(self):
         from videocontent.retrieval import EvidenceSpan
 

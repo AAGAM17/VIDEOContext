@@ -256,7 +256,8 @@ def _merge_mentions(mentions: dict[str, dict[str, Any]],
         shared = tokens(ka) & tokens(kb)
         if shared and any(len(t) >= 4 for t in shared):
             return True
-        return bool(similarity) and difflib.SequenceMatcher(None, ka, kb).ratio() >= similarity
+        return similarity is not None \
+            and difflib.SequenceMatcher(None, ka, kb).ratio() >= similarity
 
     for i, ka in enumerate(keys):
         for kb in keys[i + 1:]:
@@ -345,10 +346,11 @@ class EntityTimeline:
         return [o.ref_id for o in self.occurrences]
 
     def to_dict(self) -> dict[str, Any]:
+        first, last = self.first_occurrence(), self.last_occurrence()
         return {
             "entity": self.entity.to_dict(),
-            "first": self.first_occurrence().to_dict() if self.first_occurrence() else None,
-            "last": self.last_occurrence().to_dict() if self.last_occurrence() else None,
+            "first": first.to_dict() if first is not None else None,
+            "last": last.to_dict() if last is not None else None,
             "count": len(self.occurrences),
         }
 

@@ -26,7 +26,7 @@ property that will be called inside a loop by someone who did not read this docs
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -39,7 +39,7 @@ from .timecode import parse_timecode
 
 if TYPE_CHECKING:  # pragma: no cover - import cost paid only when searching
     from .retrieval.query import Retriever, SearchResult
-    from .routing import TaskClassification, ContextBudget
+    from .routing import TaskClassification
 
 log = get_logger("sdk")
 
@@ -395,12 +395,14 @@ class Video:
         node = graph.get_node(node_or_edge_id)
         if node is None:
             return None
+        neighbors = graph.neighbors(node_or_edge_id)
         return {
             "node": node.to_dict(),
             "supporting_evidence": [n.to_dict()
                                     for n in graph.supporting_evidence(node_or_edge_id)],
             "neighbors": [{"node": n.to_dict(), "edge": e.to_dict()}
-                          for n, e in graph.neighbors(node_or_edge_id)[:20]],
+                          for n, e in neighbors[:20]],
+            "neighbor_count": len(neighbors),
         }
 
     def context_package(self, task: str, **kw: Any) -> Any:
@@ -430,7 +432,11 @@ class Video:
             max_spans=kw.get("max_spans"), max_frames=kw.get("max_frames"))
 
     def plan(self, task: str) -> dict[str, Any]:
-        """What would ``task`` need? Returns plan + coverage against this document."""
+        """What processing would ``task`` need? Plan + coverage against this document.
+
+        This is the *processing* plan (stages, providers). For the per-question
+        *query* plan (intent, entities, retrieval strategy), see :meth:`query_plan`.
+        """
         from .plans import check_coverage, plan_for_task
 
         if not self.processed:

@@ -76,6 +76,11 @@ class TestTimeline:
     def test_empty_range(self):
         assert len(timeline(sample(), 150.0, 160.0).spans) == 0
 
+    def test_inverted_range_says_so(self):
+        result = timeline(sample(), 60.0, 10.0)
+        assert len(result.spans) == 0
+        assert any("inverted" in note for note in result.notes)
+
 
 class TestTemporalQueries:
     def test_plain_query_unchanged(self):

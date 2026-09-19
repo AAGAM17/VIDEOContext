@@ -436,6 +436,11 @@ class Retriever:
         began = time.perf_counter()
         selected = self._selected(modalities)
         stop = self.doc.video.duration if end is None else end
+        if stop < start:
+            return SearchResult(
+                query=format_span(start, stop), spans=(), modalities=selected,
+                total=0, took_ms=(time.perf_counter() - began) * 1000.0,
+                notes=(f"inverted range {start:g} > {stop:g} — swap the bounds",))
         order = {name: position for position, name in enumerate(MODALITIES)}
         covering = [
             record

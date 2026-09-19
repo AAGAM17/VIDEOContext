@@ -13,9 +13,8 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
-from ..schema.v1 import VideoContextDocument, TimeSpan
-from ..profiles import list_profiles, get_profile_builder, ProfileContext
-from ..retrieval import search, SearchResult, EvidenceSpan
+from ..retrieval import EvidenceSpan, SearchResult, search
+from ..schema.v1 import VideoContextDocument
 
 
 class TaskType(str, Enum):
@@ -249,7 +248,7 @@ def select_context(
     seconds later). Expansion is merged, deduplicated, and still subject to the
     budget — it never silently inflates context.
     """
-    from ..profiles import get_profile_builder, ProfileContext
+    from ..profiles import ProfileContext, get_profile_builder
 
     selection = {
         "profiles": {},
@@ -405,9 +404,7 @@ def select_representative_frames(doc: VideoContextDocument, max_frames: int = 10
             score += 10
         elif frame.reason == "boundary_burst":
             score += 8
-        elif frame.reason == "motion":
-            score += 5
-        elif frame.reason == "ocr_density":
+        elif frame.reason == "motion" or frame.reason == "ocr_density":
             score += 5
         elif frame.reason == "event":
             score += 7
@@ -660,10 +657,10 @@ def format_profile(profile: Any) -> str:
 
 
 __all__ = [
-    "TaskType",
-    "TaskClassification",
     "ContextBudget",
     "ContextSelection",
+    "TaskClassification",
+    "TaskType",
     "classify_task",
     "dedupe_spans",
     "enforce_budgets",

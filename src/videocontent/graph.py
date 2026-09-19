@@ -230,7 +230,7 @@ class EvidenceGraph:
             "provenance": list(edge.provenance),
         }
 
-    def stats(self) -> dict[str, int]:
+    def stats(self) -> dict[str, Any]:
         kinds: dict[str, int] = {}
         for node in self.nodes.values():
             kinds[node.kind] = kinds.get(node.kind, 0) + 1
@@ -264,11 +264,11 @@ def build_graph(doc: Any, *, max_nodes: int = 5000, max_edges: int = 20000,
         graph._add_edge(source, target, relation, confidence, rule, provenance, max_edges)
 
     # Fact nodes.
-    for group in _FACT_GROUPS:
-        for item in getattr(doc, group, []):
+    for group_name in _FACT_GROUPS:
+        for item in getattr(doc, group_name, []):
             start = float(getattr(item, "start", getattr(item, "ts", 0.0)))
             end = float(getattr(item, "end", getattr(item, "ts", start)))
-            graph._add_node(Node(item.id, _NODE_KIND[group], start, end,
+            graph._add_node(Node(item.id, _NODE_KIND[group_name], start, end,
                                  _label(item, item.id), (item.id,), True),
                             max_nodes)
 
@@ -330,14 +330,14 @@ def build_graph(doc: Any, *, max_nodes: int = 5000, max_edges: int = 20000,
     for name, group in by_name.items():
         if len(group) < 2:
             continue
-        for first in group:
-            for second in group:
-                if first.id >= second.id:
+        for ent_a in group:
+            for ent_b in group:
+                if ent_a.id >= ent_b.id:
                     continue
-                edge(first.id, second.id, "SAME_CONCEPT", 0.7,
+                edge(ent_a.id, ent_b.id, "SAME_CONCEPT", 0.7,
                      f"both entities normalize to {name!r} but came from different "
-                     f"detectors ({first.method} vs {second.method}); kept separate, "
-                     f"linked as the same concept", (first.id, second.id))
+                     f"detectors ({ent_a.method} vs {ent_b.method}); kept separate, "
+                     f"linked as the same concept", (ent_a.id, ent_b.id))
 
     # Changes, chapters, states (each derived view computed once and reused).
     changes = detect_changes(doc)
@@ -384,23 +384,24 @@ def build_graph(doc: Any, *, max_nodes: int = 5000, max_edges: int = 20000,
     # Temporal chain over observed facts in timeline order.
     facts = sorted((n for n in graph.nodes.values() if n.observed),
                    key=lambda n: (n.start, n.end, n.id))
-    for first, second in pairwise(facts):
-        relations = relate(first.start, first.end, second.start, second.end)
-        gap = max(0.0, second.start - first.end)
+    for prev_node, next_node in pairwise(facts):
+        relations = relate(prev_node.start, prev_node.end, next_node.start, next_node.end)
+        gap = max(0.0, next_node.start - prev_node.end)
         if TemporalRelation.PRECEDES in relations:
             if gap > chain_gap_s:
                 continue
             relation, rule = ("PRECEDES",
-                              f"{second.id} starts {gap:.1f}s after {first.id} ends")
+                              f"{next_node.id} starts {gap:.1f}s after {prev_node.id} ends")
         elif TemporalRelation.OVERLAPS in relations:
             relation, rule = ("OVERLAPS",
-                              f"{first.id} and {second.id} overlap in time")
+                              f"{prev_node.id} and {next_node.id} overlap in time")
         elif gap <= chain_gap_s and TemporalRelation.NEAR in relations:
             relation, rule = ("NEAR",
-                              f"{second.id} starts {gap:.1f}s after {first.id} ends")
+                              f"{next_node.id} starts {gap:.1f}s after {prev_node.id} ends")
         else:
             continue
-        edge(first.id, second.id, relation, 1.0, rule, (first.id, second.id))
+        edge(prev_node.id, next_node.id, relation, 1.0, rule,
+             (prev_node.id, next_node.id))
 
     log.debug("graph.built", extra={"nodes": len(graph.nodes), "edges": len(graph.edges)})
     return graph

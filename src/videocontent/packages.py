@@ -183,6 +183,8 @@ def optimize_frames(frames: list[dict[str, Any]], *,
 def relevant_ranges_for(spans: list[Any], duration: float,
                         *, radius_s: float = 5.0) -> list[dict[str, Any]]:
     """Merged temporal windows covering the evidence — 'where to look'."""
+    if duration <= 0 or not spans:
+        return []
     windows = merge_windows([window_around(s.start, s.end, radius_s, duration)
                              for s in spans])
     return [{"start": round(w.start, 3), "end": round(w.end, 3),

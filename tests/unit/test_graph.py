@@ -78,6 +78,12 @@ class TestNodes:
         assert [n.kind for n in graph.node_list()] == ["chapter"]
         assert graph.edge_list() == []
 
+    def test_fact_node_refs(self):
+        graph = build_graph(sample())
+        node = graph.get_node("utt_0001")
+        assert node is not None and node.refs == ("utt_0001",)
+        assert node.to_dict()["refs"] == ["utt_0001"]
+
     def test_bounds(self):
         graph = build_graph(sample(), max_nodes=5, max_edges=7)
         assert len(graph.node_list()) <= 5
