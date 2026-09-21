@@ -427,9 +427,13 @@ class Video:
             frames=list(selection.frames), entities=entities,
             graph_summary=graph.stats(),
             budget={"max_tokens": kw.get("max_tokens", 4000),
+                    "max_spans": kw.get("max_spans"),
+                    "max_frames": kw.get("max_frames"),
+                    "max_seconds": kw.get("max_seconds"),
                     "notes": selection.budget_notes},
             warnings=[*plan.warnings],
-            max_spans=kw.get("max_spans"), max_frames=kw.get("max_frames"))
+            max_spans=kw.get("max_spans"), max_frames=kw.get("max_frames"),
+            max_seconds=kw.get("max_seconds"))
 
     def plan(self, task: str) -> dict[str, Any]:
         """What processing would ``task`` need? Plan + coverage against this document.

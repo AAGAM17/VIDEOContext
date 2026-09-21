@@ -166,3 +166,15 @@ class TestTraversal:
         stats = build_graph(sample()).stats()
         assert stats["nodes"] == len(build_graph(sample()).node_list())
         assert sum(stats["kinds"].values()) == stats["nodes"]
+
+    def test_dense_traversal_terminates(self):
+        # SAME_CONCEPT + chain edges make the graph densely connected; BFS must
+        # still terminate via the seen set, and depth bounds must hold.
+        graph = build_graph(sample())
+        nodes = graph.node_list()
+        trail = graph.path(nodes[0].id, nodes[-1].id)
+        assert trail is None or all(t in graph.edges for t in trail)
+        assert graph.path(nodes[0].id, nodes[-1].id, max_depth=0) is None
+        hub = max(nodes, key=lambda n: len(graph.neighbors(n.id)))
+        assert graph.neighbors(hub.id)
+        assert graph.temporal_neighbors(hub.id, radius_s=1000.0, max_nodes=5).__len__() <= 5

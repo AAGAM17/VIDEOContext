@@ -220,7 +220,7 @@ Pure functions over the finished document — they relate facts, never extract n
   dedup → structural budgets (`max_spans`/`max_seconds`/`max_frames`) → token trim →
   package. Every cut is recorded in `budget_notes`.
 
-## Stored facts vs derived views vs query-time intelligence
+### Stored facts vs derived views vs query-time intelligence
 
 - **Stored** (`.vctx`): transcript, OCR, vision, objects, events, scenes, segments,
   frames, stages, metrics, source. Covered by the format spec and migrations.

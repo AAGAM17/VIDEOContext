@@ -277,6 +277,18 @@ class TestPackages:
         assert {s.modality for s in kept} == {"ocr", "transcript"}
         assert len(omitted) == 3 and all("max_spans" in o["why"] for o in omitted)
 
+    def test_optimize_max_seconds(self):
+        from videocontent.retrieval import EvidenceSpan
+
+        spans = [EvidenceSpan(start=0.0, end=50.0, modality="ocr", text="long",
+                              score=9.0, ref_ids=("a",)),
+                 EvidenceSpan(start=60.0, end=65.0, modality="transcript", text="short",
+                              score=1.0, ref_ids=("b",))]
+        kept, omitted = optimize_evidence(spans, max_seconds=30.0)
+        # Rank order wins: the first span is kept even over budget, the rest cut.
+        assert [s.ref_ids for s in kept] == [("a",)]
+        assert omitted and "max_seconds" in omitted[0]["why"]
+
     def test_contained_redundancy_dropped(self):
         from videocontent.retrieval import EvidenceSpan
 

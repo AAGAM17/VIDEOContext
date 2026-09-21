@@ -617,16 +617,13 @@ async def get_profile(video_id: str, request: ProfileRequest) -> ProfileResponse
 
     try:
         profile = video.profile(request.profile_name)
-        if hasattr(profile, "model_dump"):
-            profile_data = profile.model_dump()
-        else:
-            profile_data = profile
+        profile_data = profile.model_dump() if hasattr(profile, "model_dump") else profile
         return ProfileResponse(
             profile_name=request.profile_name,
             profile=profile_data,
             available=True,
         )
-    except ValueError as e:
+    except ValueError:
         return ProfileResponse(
             profile_name=request.profile_name,
             profile=None,

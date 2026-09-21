@@ -223,10 +223,8 @@ def detect_changes(doc: Any) -> list[Change]:
     duration = max(0.0, float(getattr(getattr(doc, "video", None), "duration", 0.0) or 0.0))
     scenes = sorted(getattr(doc, "scenes", []), key=lambda s: (s.start, s.end))
     if len(scenes) >= 2:
-        bounds = [(s.end, scenes[i + 1].start) for i, s in enumerate(scenes[:-1])]
         regions = [(0.0, scenes[0].end)]
         regions += [(scenes[i + 1].start, scenes[i + 1].end) for i in range(len(scenes) - 1)]
-        _ = bounds
     elif duration > 0:
         regions = [(0.0, duration / 2), (duration / 2, duration)]
     else:

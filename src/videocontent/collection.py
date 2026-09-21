@@ -212,10 +212,11 @@ class _CollectionDoc:
     """Minimal document facade so packages can describe a collection."""
 
     def __init__(self, docs: dict[str, Any]) -> None:
-        self._docs = docs
+        from types import SimpleNamespace
+
         self.id = f"collection:{len(docs)}"
         self.vctx_version = "1.0"
-        self.video = type("V", (), {"duration": 0.0})()
+        self.video = SimpleNamespace(duration=0.0)
         self.producer = None
         self.source = None
         self.stages: list[Any] = []

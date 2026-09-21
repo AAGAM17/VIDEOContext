@@ -124,12 +124,13 @@ class ContextPackage:
         return "\n".join(lines)
 
 
-def optimize_evidence(spans: list[Any], *, max_spans: int | None = None) -> tuple[
+def optimize_evidence(spans: list[Any], *, max_spans: int | None = None,
+                      max_seconds: float | None = None) -> tuple[
         list[Any], list[dict[str, Any]]]:
-    """Dedupe, drop contained redundancies, enforce the span cap.
+    """Dedupe, drop contained redundancies, enforce span and duration caps.
 
     Anchor preservation: modalities present in the input keep at least one span
-    whenever the cap allows; anything dropped is recorded in ``omitted``.
+    whenever a cap allows; anything dropped is recorded in ``omitted``.
     """
     from .routing import dedupe_spans  # deferred: routing pulls the profile stack
 
@@ -156,6 +157,18 @@ def optimize_evidence(spans: list[Any], *, max_spans: int | None = None) -> tupl
         kept = final[:max_spans]
         omitted = [{"ref_ids": list(s.ref_ids), "why": f"max_spans={max_spans}"}
                    for s in dropped]
+    if max_seconds is not None:
+        sized: list[Any] = []
+        covered = 0.0
+        for span in kept:
+            span_s = max(0.0, span.end - span.start)
+            if sized and covered + span_s > max_seconds:
+                omitted.append({"ref_ids": list(span.ref_ids),
+                                "why": f"max_seconds={max_seconds:g}"})
+                continue
+            sized.append(span)
+            covered += span_s
+        kept = sized
     return kept, omitted
 
 
@@ -203,9 +216,11 @@ def build_package(doc: Any, query: str, spans: list[Any], *,
                   budget: dict[str, Any] | None = None,
                   max_spans: int | None = None,
                   max_frames: int | None = None,
+                  max_seconds: float | None = None,
                   warnings: list[str] | None = None) -> ContextPackage:
     """Assemble an optimized, budgeted, provenance-preserving package."""
-    evidence, omitted_spans = optimize_evidence(spans, max_spans=max_spans)
+    evidence, omitted_spans = optimize_evidence(spans, max_spans=max_spans,
+                                                max_seconds=max_seconds)
     kept_frames, omitted_frames = optimize_frames(frames or [], max_frames=max_frames)
     omitted = omitted_spans + omitted_frames
     video = getattr(doc, "video", None)
