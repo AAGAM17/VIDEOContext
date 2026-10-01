@@ -44,7 +44,13 @@ from .render import console, errors
 
 app = typer.Typer(
     name="videocontent",
-    help="Turn video into timestamped, searchable context. Runs locally by default.",
+    help=(
+        "VIDEOContext: timestamped, evidence-backed context from video, for you and your AI "
+        "coding agent. Runs locally by default.\n\n"
+        "Start:  videocontent analyze demo.mp4\n\n"
+        "Then:   videocontent ask demo.mp4 \"What happened after the error?\"\n\n"
+        "Agents: videocontent init-agent   (installs the skill for Claude Code, Codex, ...)"
+    ),
     no_args_is_help=True,
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -118,6 +124,58 @@ def _timestamp(value: str) -> float:
 
 def _optional_timestamp(value: str | None) -> float | None:
     return None if value is None else _timestamp(value)
+
+
+_DOC_HELP = "A video file, its .vctx document, or an http(s) URL that was analyzed."
+_AGENT_HELP = ("Emit the agent envelope: bounded, provenance-labelled, credential-redacted "
+               "JSON (what AI agents should use).")
+
+
+def _k(value: int, default: int) -> int:
+    """A CLI ``--top-k`` for the agent envelope: ``0`` (all) becomes the envelope maximum."""
+    from ..agent.ops import MAX_ITEMS
+
+    return MAX_ITEMS if value <= 0 else value or default
+
+
+def _locate(ref: str) -> Any:
+    """Resolve a video/.vctx/URL reference without processing anything.
+
+    A path that does not exist is a usage error (exit 2), exactly as before this argument
+    accepted videos; everything else surfaces as a library error with its hint.
+    """
+    from ..agent.ops import AgentError, locate
+
+    try:
+        return locate(ref)
+    except AgentError as exc:
+        raise typer.BadParameter(exc.message) from None
+
+
+def _resolve(ref: str) -> Path:
+    """The ``.vctx`` for ``ref``: the file itself, or the document beside the video."""
+    from ..agent.ops import display_source
+
+    where = _locate(ref)
+    if where.vctx is None:
+        shown = display_source(ref)
+        raise VideoContextError(
+            f"{shown} has not been analyzed yet",
+            hint=f"run `videocontent analyze {shown}` first (local, once; later commands "
+                 "reuse the result)",
+        )
+    if where.stale:
+        errors.print(f"warning: {where.media} changed after {where.vctx} was written; "
+                     "run `videocontent analyze --force` to refresh", style="yellow")
+    return Path(where.vctx)
+
+
+def _stem(ref: str) -> str:
+    name = Path(ref.split("?", 1)[0]).name
+    for suffix in (".vctx.gz", ".vctx"):
+        if name.endswith(suffix):
+            return name[: -len(suffix)]
+    return Path(name).stem
 
 
 def _version_callback(value: bool) -> None:
@@ -224,15 +282,182 @@ def process(
         errors.print(f"warning: {len(failed)} stage(s) failed: {', '.join(failed)}")
 
 
+# -- analyze (the one-shot entry point) --------------------------------------
+
+
+@app.command()
+@friendly
+def analyze(
+    video: str = typer.Argument(..., help="Video file, .vctx document, or http(s) URL.",
+                                metavar="VIDEO"),
+    profile: str | None = typer.Option(
+        None, "--profile", "-p",
+        help="Also summarize a semantic profile: ui_design, application, product_demo, "
+             "tutorial."),
+    no_process: bool = typer.Option(
+        False, "--no-process", help="Never process; report what exists (or that nothing does)."),
+    force: bool = typer.Option(False, "--force", help="Re-process even if a .vctx exists."),
+    output: Path | None = typer.Option(
+        None, "--output", "-o", help="Where to read/write the .vctx. Default: beside the video."),
+    as_json: bool = typer.Option(False, "--json", "--agent", help="Emit the agent JSON envelope."),
+) -> None:
+    """Understand a video in one step: reuse or create its analysis, then summarize it.
+
+    An existing .vctx is reused (nothing is processed twice). Otherwise the video is processed
+    locally with the default pipeline — speech, on-screen text, scenes, events; vision stays
+    off unless you configured it — and the .vctx is written beside the video. The summary
+    names what is covered, what is missing and why, the key moments, entities, chapters and
+    changes, and the commands to go deeper.
+    """
+    from ..agent import ops
+
+    report = ops.analyze(video, config=state.config, process=not no_process, force=force,
+                         output=output, profile=profile)
+    if as_json:
+        _emit(report)
+        return
+    result = report["result"]
+    for warning in report["warnings"]:
+        errors.print(f"warning: {warning}", style="yellow")
+    if result.get("status") == "not_analyzed":
+        console.print(render.bold(f"{result['source']}: not analyzed yet"))
+        console.print(f"next: {result['next']}")
+        return
+    info = report["video"]
+    console.print(render.bold(f"{info['filename']}") + Text(
+        f" · {info['duration_s']:.1f}s · {result['action']} {result['vctx']}"))
+    labels = {"speech": "speech", "on_screen_text": "on-screen text", "events": "events",
+              "visual_descriptions": "visual descriptions", "scenes": "scenes",
+              "frames": "frames", "objects": "objects"}
+    parts = []
+    for key, entry in result["coverage"]["modalities"].items():
+        mark = "✓" if entry["count"] else ("·" if entry["stage"] == "ok" else "—")
+        parts.append(f"{labels.get(key, key)} {mark} {entry['count'] or entry['stage']}")
+    console.print("coverage: " + " | ".join(parts))
+    if result["key_moments"]:
+        console.print(render.bold("\nkey moments"))
+        for moment in result["key_moments"]:
+            console.print(f"  {moment['timecode']}  {moment['type']:<8} {moment['entity']}")
+    if result["chapters"]:
+        console.print(render.bold("\nchapters") + Text(" (titles are derived keywords)"))
+        for chapter in result["chapters"]:
+            console.print(f"  {chapter['timecode']}  {chapter['title']}")
+    if result["entities"]:
+        console.print(render.bold("\nentities"))
+        for entity in result["entities"]:
+            flag = " (uncertain)" if entity["ambiguous"] else ""
+            console.print(f"  {entity['first_seen']}  {entity['type']:<8} "
+                          f"{entity['name']} x{entity['occurrences']}{flag}")
+    console.print(f"\nevents: {result['events']['total']} · changes: "
+                  f"{result['changes']['total']}")
+    if result.get("profile"):
+        console.print(render.bold(f"\nprofile: {profile}"))
+        console.print(json.dumps(result["profile"], indent=2, default=str)[:3000])
+    console.print(render.bold("\nnext"))
+    for step in result["next"]:
+        console.print(f"  {step}")
+
+
+# -- agent integration --------------------------------------------------------
+
+
+@app.command()
+@friendly
+def mcp(
+    root: Path | None = typer.Option(
+        None, "--root", help="Only files under this directory are readable. Default: cwd.",
+        file_okay=False),
+) -> None:
+    """Run the MCP server on stdio (for Claude Code, Codex and other MCP clients).
+
+    Register it with, for example: claude mcp add videocontent -- videocontent mcp
+    """
+    from ..agent.mcp_server import run
+
+    run(root=root, config=state.config)
+
+
+@app.command(name="init-agent")
+@friendly
+def init_agent(
+    agent: list[str] = typer.Option(
+        [], "--agent", "-a",
+        help="claude, codex, agents (generic Agent Skills) or all. Default: every agent "
+             "detected on this machine. Repeatable."),
+    scope: str = typer.Option("user", "--scope",
+                              help="user (all projects) or project (this directory only)."),
+    mcp_: bool = typer.Option(False, "--mcp",
+                              help="Also register the MCP server via each agent's own CLI."),
+    force: bool = typer.Option(False, "--force",
+                               help="Replace a same-named skill not installed by videocontent."),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Show the plan; change nothing."),
+    check: bool = typer.Option(False, "--check", help="Report where the skill is installed."),
+    as_json: bool = typer.Option(False, "--json", help="Emit the report as JSON."),
+) -> None:
+    """Teach your coding agents to use VIDEOContext: install the skill (and optionally MCP).
+
+    Copies the provider-neutral VIDEOContext skill into each agent's skills directory.
+    Existing skills that videocontent did not install are never overwritten without --force,
+    and agent configuration is only changed with --mcp, through the agent's own CLI.
+    """
+    from ..agent import install
+
+    if check:
+        found = install.status()
+        if as_json:
+            _emit(found)
+            return
+        console.print(render.bold(f"videocontent {found['package_version']} · skill "
+                                  f"{found['skill_version']}"))
+        if not found["installed"]:
+            console.print("skill not installed — run: videocontent init-agent")
+        for row in found["installed"]:
+            state_ = ("current" if row["current"] else "outdated — re-run init-agent") \
+                if row["managed"] else "not installed by videocontent"
+            console.print(f"  {row['target']:<7} {row['scope']:<8} {row['path']} ({state_})")
+        console.print("mcp command: " + " ".join(found["mcp_command"]))
+        return
+
+    report = install.run(agent or ["auto"], scope=scope, force=force, dry_run=dry_run,
+                         mcp=mcp_)
+    if as_json:
+        _emit(report.to_dict())
+        raise typer.Exit(0 if report.ok else 1)
+    console.print(render.bold("VIDEOContext agent integration") + Text(
+        f"  (videocontent {report.package_version}, skill {report.skill_version})"))
+    marks = {"installed": "✓", "updated": "✓", "up_to_date": "✓", "would_install": "→",
+             "would_update": "→", "skipped": "!", "failed": "✗"}
+    for step in report.steps:
+        status = step.status.replace("_", " ")
+        console.print(f"  {marks.get(step.status, '?')} {step.label}: {status} — {step.path}")
+        if step.detail:
+            errors.print(f"      {step.detail}", style="yellow")
+    for entry in report.mcp:
+        command = " ".join(entry["command"])
+        if entry["status"] == "not_requested":
+            console.print(f"  · MCP for {entry['target']} (optional): {command}")
+        else:
+            ok = entry["status"] in ("registered", "already_registered")
+            detail = f" — {entry['detail']}" if entry.get("detail") else ""
+            console.print(f"  {'✓' if ok else '!'} MCP for {entry['target']}: "
+                          f"{entry['status'].replace('_', ' ')}{detail}")
+    invokes = [s.invoke for s in report.steps if s.status in ("installed", "updated",
+                                                               "up_to_date")]
+    if invokes:
+        console.print(render.bold("\nTry it") + Text(" (restart the agent first):"))
+        console.print(f"  {invokes[0]} analyze demo.mp4")
+        console.print('  or just ask: "Analyze demo.mp4 with VIDEOContext."')
+    if not report.ok:
+        raise typer.Exit(1)
+
+
 # -- inspect ---------------------------------------------------------------
 
 
 @app.command()
 @friendly
 def inspect(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     scenes: bool = typer.Option(False, "--scenes", help="Show every scene."),
     transcript: bool = typer.Option(False, "--transcript", "-t", help="Show every utterance."),
     ocr: bool = typer.Option(False, "--ocr", help="Show every on-screen text event."),
@@ -244,16 +469,41 @@ def inspect(
         0, "--limit", "-n", metavar="N",
         help=f"Rows per section. Default: {_PREVIEW} in the overview, all with a section flag.",
     ),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the selection as JSON."),
 ) -> None:
-    """Show what a .vctx document contains.
+    """Show what a video's analysis contains — or that it has none yet. Never processes.
 
     With no section flags you get the overview: metadata, what each stage did, how many facts of
     each kind there are, and a short preview of each section. Section flags print that section
     in full — the counts table is the thing to read first, because it distinguishes "no text on
     screen" from "OCR never ran".
     """
-    doc = io.load(document)
+    if agent_out:
+        from ..agent import ops
+
+        _emit(ops.inspect(document, config=state.config))
+        return
+    from ..agent import ops
+
+    where = _locate(document)
+    if where.vctx is None:
+        report = ops.inspect(document, config=state.config)
+        if as_json:
+            _emit(report)
+            return
+        result = report["result"]
+        media = result.get("media") or {}
+        console.print(render.bold(f"{result['source']}: not analyzed yet"))
+        if media:
+            console.print(f"duration {media.get('duration_s', 0):.1f}s · "
+                          f"{media.get('width')}x{media.get('height')} · "
+                          f"audio: {'yes' if media.get('has_audio') else 'no'}")
+        for warning in report["warnings"]:
+            errors.print(f"warning: {warning}", style="yellow")
+        console.print(f"next: {result['next']}")
+        return
+    doc = io.load(_resolve(document))
     asked = {
         "scenes": scenes, "transcript": transcript, "ocr": ocr,
         "vision": vision, "events": events, "segments": segments,
@@ -279,6 +529,7 @@ def inspect(
             "metrics": doc.metrics.model_dump(mode="json"),
             "stages": [s.model_dump(mode="json") for s in doc.stages],
             "counts": {name: len(getattr(doc, name)) for name in _SECTIONS},
+            "coverage": ops.coverage(doc),
             "truncated": cap is not None,
         }
         for name in selected:
@@ -327,9 +578,7 @@ def inspect(
 @app.command()
 @friendly
 def search(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     query: str = typer.Argument(..., help="Words to look for, in speech and on screen."),
     top_k: int = typer.Option(10, "--top-k", "-k", help="Results to show. 0 for all."),
     modality: list[str] = typer.Option(
@@ -339,6 +588,7 @@ def search(
     start: str | None = typer.Option(None, "--from", help="Only after this timecode."),
     end: str | None = typer.Option(None, "--to", help="Only before this timecode."),
     min_score: float | None = typer.Option(None, "--min-score", help="Drop weaker matches."),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
     temporal: bool = typer.Option(False, "--temporal",
                                   help="Plan temporal questions (before/after/first/range)."),
@@ -352,9 +602,13 @@ def search(
 
     Exits 0 with no results when nothing matched.
     """
-    from ..sdk import load as load_video
+    if agent_out:
+        from ..agent import ops
 
-    video = load_video(document, config=state.config)
+        _emit(ops.search(document, query, top_k=_k(top_k, 10), modalities=modality,
+                         config=state.config))
+        return
+    video = _load_video(document)
     plan = None
     if temporal:
         plan, result = video.retriever.query_temporal(
@@ -406,9 +660,7 @@ def search(
 @app.command()
 @friendly
 def at(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     timecode: str = typer.Argument(..., help="An instant: 201.45, 3:21 or 00:03:21.450."),
     window: float = typer.Option(
         0.0, "--window", "-w", help="Also include facts within this many seconds.",
@@ -423,9 +675,7 @@ def at(
     Not a search: every span returned demonstrably covers the timestamp, so there is nothing to
     rank. Output is ordered speech, screen, vision, events — read it as a snapshot.
     """
-    from ..sdk import load as load_video
-
-    video = load_video(document, config=state.config)
+    video = _load_video(document)
     result = video.at(_timestamp(timecode), window=window, modalities=modality or None)
     if as_json:
         _emit(result.to_dict())
@@ -443,15 +693,14 @@ def at(
 @app.command()
 @friendly
 def ask(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     question: str = typer.Argument(..., help="Question to ask about the video."),
     top_k: int = typer.Option(5, "--top-k", "-k", help="Max evidence spans to use."),
     modality: list[str] = typer.Option(
         [], "--modality", "-m", help="Restrict search to these modalities.",
     ),
     min_score: float | None = typer.Option(None, "--min-score", help="Drop weaker matches."),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
     explain: bool = typer.Option(False, "--explain", help="Show the query plan and trace."),
 ) -> None:
@@ -461,9 +710,13 @@ def ask(
     Temporal questions ("before the error", "when did X first appear") are planned
     explicitly. Every answer carries its evidence spans so you can verify timestamps.
     """
-    from ..sdk import load as load_video
+    if agent_out:
+        from ..agent import ops
 
-    video = load_video(document, config=state.config)
+        _emit(ops.ask(document, question, top_k=_k(top_k, 5), modalities=modality,
+                      config=state.config))
+        return
+    video = _load_video(document)
     answer = video.ask(
         question,
         modalities=modality or None,
@@ -471,7 +724,18 @@ def ask(
         min_score=min_score,
     )
     if as_json:
-        _emit(answer.to_dict())
+        from ..agent import ops
+
+        # The original keys (question/answer/confidence/evidence/trace) are unchanged; the
+        # agent fields are added beside them so existing consumers keep working.
+        agent = ops.ask_envelope(video, _locate(document), answer)
+        payload = answer.to_dict()
+        payload.update({key: agent["result"][key] for key in (
+            "query", "answer_kind", "timestamps", "entities", "events",
+            "temporal_relations", "context")})
+        payload.update(schema=agent["schema"], video=agent["video"],
+                       warnings=agent["warnings"], content_notice=agent["content_notice"])
+        _emit(payload)
         return
     console.print(render.bold(f"Q: {answer.question}"))
     console.print(render.bold(f"A: {answer.answer}"))
@@ -495,25 +759,31 @@ def ask(
 # -- timeline / events / entities / changes / chapters / context ---------------
 
 
-def _load_video(document: Path):
+def _load_video(document: str):
     from ..sdk import load as load_video
 
-    return load_video(document, config=state.config)
+    return load_video(_resolve(document), config=state.config)
 
 
 @app.command()
 @friendly
 def timeline(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     start: str | None = typer.Option(None, "--from", help="Range start timecode."),
     end: str | None = typer.Option(None, "--to", help="Range end timecode."),
     modality: list[str] = typer.Option([], "--modality", "-m", help="Restrict modalities."),
     top_k: int = typer.Option(100, "--top-k", "-k", help="Max facts to show. 0 for all."),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
     """Show everything the document knows about a time range, in timeline order."""
+    if agent_out:
+        from ..agent import ops
+
+        _emit(ops.timeline(document, start=_optional_timestamp(start) or 0.0,
+                           end=_optional_timestamp(end), top_k=_k(top_k, 30),
+                           modalities=modality, config=state.config))
+        return
     video = _load_video(document)
     result = video.timeline(_optional_timestamp(start) or 0.0,
                             _optional_timestamp(end), modalities=modality or None,
@@ -532,9 +802,7 @@ def timeline(
 @app.command()
 @friendly
 def events(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     type_: str | None = typer.Option(None, "--type", "-t", help="Only this event type."),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
@@ -555,15 +823,19 @@ def events(
 @app.command()
 @friendly
 def entities(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     type_: str | None = typer.Option(None, "--type", "-t",
                                      help="Only this entity type (ERROR, COMMAND, CONCEPT)."),
     top_k: int = typer.Option(50, "--top-k", "-k", help="Max entities to show."),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
     """List timestamp-grounded entities with cross-modal links and uncertainty."""
+    if agent_out:
+        from ..agent import ops
+
+        _emit(ops.entities(document, type_=type_, top_k=_k(top_k, 20), config=state.config))
+        return
     video = _load_video(document)
     matched = video.entities()
     if type_ is not None:
@@ -581,12 +853,16 @@ def entities(
 @app.command()
 @friendly
 def changes(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
     """Show what changed between adjacent regions (text, speech, scenes)."""
+    if agent_out:
+        from ..agent import ops
+
+        _emit(ops.changes(document, config=state.config))
+        return
     video = _load_video(document)
     found = video.changes()
     if as_json:
@@ -601,9 +877,7 @@ def changes(
 @app.command()
 @friendly
 def chapters(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     target: float = typer.Option(300.0, "--target-s", help="Target seconds per chapter."),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
@@ -624,19 +898,24 @@ def chapters(
 @app.command(name="context")
 @friendly
 def context_cmd(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     task: str = typer.Argument(..., help="Task to build context for."),
     max_tokens: int = typer.Option(4000, "--max-tokens", help="Token budget."),
     max_spans: int | None = typer.Option(None, "--max-spans", help="Cap evidence spans."),
     max_frames: int | None = typer.Option(None, "--max-frames", help="Cap frames."),
     expand: float = typer.Option(0.0, "--expand-s",
                                  help="Pull ±N seconds around each match."),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
     explain: bool = typer.Option(False, "--explain", help="Show budget decisions."),
 ) -> None:
     """Build a minimal, budgeted AI context package for a task."""
+    if agent_out:
+        from ..agent import ops
+
+        _emit(ops.context(document, task, max_tokens=max_tokens, max_spans=max_spans or 12,
+                          max_frames=max_frames or 6, config=state.config))
+        return
     video = _load_video(document)
     ctx = video.context(task, max_tokens=max_tokens, max_spans=max_spans,
                         max_frames=max_frames, expand_s=expand)
@@ -661,9 +940,7 @@ def context_cmd(
 @app.command()
 @friendly
 def graph(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     node: str | None = typer.Option(None, "--node", "-n",
                                     help="Show neighbors of this node ID."),
     entity: str | None = typer.Option(None, "--entity", "-e",
@@ -705,13 +982,17 @@ def graph(
 @app.command(name="entity-timeline")
 @friendly
 def entity_timeline_cmd(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     name: str = typer.Argument(..., help="Entity name, e.g. ConnectionError."),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
     """Every occurrence of an entity in time order, with supporting evidence."""
+    if agent_out:
+        from ..agent import ops
+
+        _emit(ops.entities(document, name=name, config=state.config))
+        return
     video = _load_video(document)
     timeline = video.entity_timeline(name)
     if timeline is None:
@@ -733,9 +1014,7 @@ def entity_timeline_cmd(
 @app.command()
 @friendly
 def plan(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     question: str = typer.Argument(..., help="Question to plan for."),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
@@ -763,13 +1042,17 @@ def plan(
 @app.command()
 @friendly
 def explain(
-    document: Path = typer.Argument(
-        ..., help="A .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    document: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
     ref: str = typer.Argument(..., help="Node or edge ID, e.g. evt_0000 or edge_00001."),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
     """Explain a graph node (supporting evidence) or edge (construction rule)."""
+    if agent_out:
+        from ..agent import ops
+
+        _emit(ops.explain(document, ref, config=state.config))
+        return
     video = _load_video(document)
     explanation = video.explain(ref)
     if explanation is None:
@@ -798,29 +1081,33 @@ def explain(
 @app.command()
 @friendly
 def compare(
-    first: Path = typer.Argument(
-        ..., help="First .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
-    second: Path = typer.Argument(
-        ..., help="Second .vctx file.", exists=True, dir_okay=False, readable=True,
-    ),
+    first: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
+    second: str = typer.Argument(..., help=_DOC_HELP, metavar="VIDEO"),
+    agent_out: bool = typer.Option(False, "--agent", help=_AGENT_HELP),
     as_json: bool = typer.Option(False, "--json", help="Emit the result as JSON."),
 ) -> None:
     """Compare two videos: added/removed/changed/unchanged entities plus structure."""
-    from ..collection import compare as _compare
-    from ..sdk import load as load_video
+    if agent_out:
+        from ..agent import ops
 
-    doc_a = load_video(first, config=state.config).document
-    doc_b = load_video(second, config=state.config).document
-    result = _compare(first.stem, doc_a, second.stem, doc_b)
+        _emit(ops.compare(first, second, config=state.config))
+        return
+    from ..collection import compare as _compare
+
+    doc_a = _load_video(first).document
+    doc_b = _load_video(second).document
+    name_a, name_b = _stem(first), _stem(second)
+    if name_a == name_b:
+        name_a, name_b = f"A:{name_a}", f"B:{name_b}"
+    result = _compare(name_a, doc_a, name_b, doc_b)
     if as_json:
         _emit(result.to_dict())
         return
-    console.print(render.bold(f"{first.stem} vs {second.stem}"))
+    console.print(render.bold(f"{name_a} vs {name_b}"))
     if result.added:
-        console.print(f"added in {second.stem}: {', '.join(result.added[:10])}")
+        console.print(f"added in {name_b}: {', '.join(result.added[:10])}")
     if result.removed:
-        console.print(f"only in {first.stem}: {', '.join(result.removed[:10])}")
+        console.print(f"only in {name_a}: {', '.join(result.removed[:10])}")
     if result.changed:
         console.print(f"changed: {', '.join(result.changed[:10])}")
     if result.uncertain:

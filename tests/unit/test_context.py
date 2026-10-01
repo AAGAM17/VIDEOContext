@@ -144,7 +144,8 @@ class TestSDKIntel:
         answer = video.ask("What failed?")
         assert answer.trace["plan"]["intent"] == "fact_lookup"
         assert answer.trace["retrieved_evidence"] >= 0
-        assert answer.trace["outcome"] in ("answered", "llm_failed")
+        # No LLM is configured in tests: the answer is the evidence, labelled extractive.
+        assert answer.trace["outcome"] in ("answered", "llm_failed", "extractive")
         assert answer.trace["answer_support"]  # evidence IDs behind the answer
         temporal = video.ask("what happened before the checkout failed")
         assert temporal.trace["plan"]["intent"] == "temporal_before"

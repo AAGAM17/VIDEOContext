@@ -1,0 +1,179 @@
+{
+  "mode": "claude",
+  "analyze_seconds": {
+    "demo.mp4": 27.71,
+    "demo_cut.mp4": 21.21
+  },
+  "tasks": [
+    {
+      "task": "first-error",
+      "skill_invoked": true,
+      "commands": [
+        "inspect",
+        "search"
+      ],
+      "expected_any_of": [
+        "ask",
+        "entities",
+        "entity-timeline",
+        "search"
+      ],
+      "correct_tool": true,
+      "calls": 2,
+      "forced_reprocessing": 0,
+      "timestamps_cited": 5,
+      "timestamps_ungrounded": [],
+      "cost_usd": 0.13657239999999998,
+      "turns": 5,
+      "latency_s": 26.9,
+      "answer_chars": 778,
+      "exit": 0
+    },
+    {
+      "task": "after-error",
+      "skill_invoked": true,
+      "commands": [
+        "ask",
+        "inspect"
+      ],
+      "expected_any_of": [
+        "ask",
+        "search",
+        "timeline"
+      ],
+      "correct_tool": true,
+      "calls": 2,
+      "forced_reprocessing": 0,
+      "timestamps_cited": 10,
+      "timestamps_ungrounded": [],
+      "cost_usd": 0.14518340000000002,
+      "turns": 5,
+      "latency_s": 27.3,
+      "answer_chars": 1409,
+      "exit": 0
+    },
+    {
+      "task": "compare",
+      "skill_invoked": true,
+      "commands": [
+        "changes",
+        "compare",
+        "inspect",
+        "timeline"
+      ],
+      "expected_any_of": [
+        "compare"
+      ],
+      "correct_tool": true,
+      "calls": 6,
+      "forced_reprocessing": 0,
+      "timestamps_cited": 13,
+      "timestamps_ungrounded": [],
+      "cost_usd": 0.2439324,
+      "turns": 9,
+      "latency_s": 42.7,
+      "answer_chars": 2391,
+      "exit": 0
+    },
+    {
+      "task": "revenue",
+      "skill_invoked": true,
+      "commands": [
+        "entity-timeline",
+        "inspect",
+        "search",
+        "timeline"
+      ],
+      "expected_any_of": [
+        "entities",
+        "entity-timeline",
+        "search"
+      ],
+      "correct_tool": true,
+      "calls": 4,
+      "forced_reprocessing": 0,
+      "timestamps_cited": 14,
+      "timestamps_ungrounded": [],
+      "cost_usd": 0.1987684,
+      "turns": 7,
+      "latency_s": 28.7,
+      "answer_chars": 1416,
+      "exit": 0
+    },
+    {
+      "task": "ui",
+      "skill_invoked": true,
+      "commands": [
+        "context",
+        "inspect"
+      ],
+      "expected_any_of": [
+        "context"
+      ],
+      "correct_tool": true,
+      "calls": 2,
+      "forced_reprocessing": 0,
+      "timestamps_cited": 8,
+      "timestamps_ungrounded": [],
+      "cost_usd": 0.244817,
+      "turns": 7,
+      "latency_s": 29.6,
+      "answer_chars": 2723,
+      "exit": 0
+    },
+    {
+      "task": "timeline",
+      "skill_invoked": true,
+      "commands": [
+        "inspect",
+        "timeline"
+      ],
+      "expected_any_of": [
+        "analyze",
+        "chapters",
+        "timeline"
+      ],
+      "correct_tool": true,
+      "calls": 2,
+      "forced_reprocessing": 0,
+      "timestamps_cited": 20,
+      "timestamps_ungrounded": [],
+      "cost_usd": 0.1985656,
+      "turns": 5,
+      "latency_s": 28.6,
+      "answer_chars": 3014,
+      "exit": 0
+    },
+    {
+      "task": "explain",
+      "skill_invoked": true,
+      "commands": [
+        "entity-timeline",
+        "explain",
+        "inspect",
+        "search",
+        "timeline"
+      ],
+      "expected_any_of": [
+        "ask",
+        "entity-timeline",
+        "explain",
+        "search"
+      ],
+      "correct_tool": true,
+      "calls": 4,
+      "forced_reprocessing": 0,
+      "timestamps_cited": 12,
+      "timestamps_ungrounded": [
+        44.0
+      ],
+      "cost_usd": 0.17779160000000002,
+      "turns": 7,
+      "latency_s": 32.7,
+      "answer_chars": 1747,
+      "exit": 0
+    }
+  ],
+  "correct_tool": 7,
+  "total": 7
+}

@@ -43,6 +43,7 @@ class ContextPackage:
     events: list[dict[str, Any]] = field(default_factory=list)
     changes: list[dict[str, Any]] = field(default_factory=list)
     temporal_relations: list[dict[str, Any]] = field(default_factory=list)
+    ui_states: list[dict[str, Any]] = field(default_factory=list)
     frames: list[dict[str, Any]] = field(default_factory=list)
     graph_summary: dict[str, Any] = field(default_factory=dict)
     provenance: dict[str, Any] = field(default_factory=dict)
@@ -66,6 +67,7 @@ class ContextPackage:
             "events": self.events,
             "changes": self.changes,
             "temporal_relations": self.temporal_relations,
+            "ui_states": self.ui_states,
             "frames": self.frames,
             "graph_summary": self.graph_summary,
             "provenance": self.provenance,
@@ -212,6 +214,7 @@ def build_package(doc: Any, query: str, spans: list[Any], *,
                   events: list[dict[str, Any]] | None = None,
                   changes: list[dict[str, Any]] | None = None,
                   temporal_relations: list[dict[str, Any]] | None = None,
+                  ui_states: list[dict[str, Any]] | None = None,
                   graph_summary: dict[str, Any] | None = None,
                   budget: dict[str, Any] | None = None,
                   max_spans: int | None = None,
@@ -242,6 +245,7 @@ def build_package(doc: Any, query: str, spans: list[Any], *,
         events=events or [],
         changes=changes or [],
         temporal_relations=temporal_relations or [],
+        ui_states=ui_states or [],
         frames=kept_frames,
         graph_summary=graph_summary or {},
         provenance={

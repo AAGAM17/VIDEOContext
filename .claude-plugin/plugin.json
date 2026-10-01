@@ -1,0 +1,19 @@
+{
+  "name": "videocontent",
+  "version": "1.0.0",
+  "description": "VIDEOContext for Claude Code: analyze, search and reason over video with timestamped, evidence-backed results. Adds the /videocontent skill and the videocontent MCP tools. Requires the videocontent CLI (pip install \"videocontent[agent]\").",
+  "author": {
+    "name": "Aagam Shah",
+    "url": "https://github.com/AAGAM17"
+  },
+  "homepage": "https://github.com/AAGAM17/VIDEOContext",
+  "repository": "https://github.com/AAGAM17/VIDEOContext",
+  "license": "Apache-2.0",
+  "keywords": ["video", "screen-recording", "ocr", "transcript", "mcp", "agent-skills", "evidence"],
+  "mcpServers": {
+    "videocontent": {
+      "command": "videocontent",
+      "args": ["mcp"]
+    }
+  }
+}

@@ -421,10 +421,12 @@ class Video:
         entities = [e.to_dict() for e in self.entities()
                     if any(o.ref_id in {r for s in selection.evidence for r in s.ref_ids}
                            for o in e.occurrences)][:20]
+        events, changes, states = self._around(selection.evidence)
         return build_package(
             self.document, task, list(selection.evidence),
             plan=plan.to_dict(), intent=plan.intent.value,
             frames=list(selection.frames), entities=entities,
+            events=events, changes=changes, ui_states=states,
             graph_summary=graph.stats(),
             budget={"max_tokens": kw.get("max_tokens", 4000),
                     "max_spans": kw.get("max_spans"),
@@ -434,6 +436,36 @@ class Video:
             warnings=[*plan.warnings],
             max_spans=kw.get("max_spans"), max_frames=kw.get("max_frames"),
             max_seconds=kw.get("max_seconds"))
+
+    def _around(self, evidence: list[Any], radius_s: float = 5.0,
+                limit: int = 20) -> tuple[list[dict[str, Any]], list[dict[str, Any]],
+                                          list[dict[str, Any]]]:
+        """Events, changes and UI states overlapping the evidence windows (±``radius_s``).
+
+        Everything returned is already in the document or derived from it deterministically;
+        this only selects the part that surrounds the evidence a package carries.
+        """
+        from .temporal import detect_changes, ui_states
+        from .timecode import format_timecode
+
+        windows = [(s.start - radius_s, s.end + radius_s) for s in evidence]
+        if not windows:
+            return [], [], []
+
+        def near(start: float, end: float) -> bool:
+            return any(start <= hi and lo <= end for lo, hi in windows)
+
+        doc = self.document
+        events = [{"id": e.id, "start": e.start, "end": e.end,
+                   "timecode": format_timecode(e.start), "type": e.type,
+                   "text": e.description or "", "kind": "detected",
+                   "refs": {k: list(v) for k, v in e.refs.items()}}
+                  for e in sorted(doc.events, key=lambda e: e.start)
+                  if near(e.start, e.end)][:limit]
+        changes = [c.to_dict() for c in detect_changes(doc) if near(c.ts, c.ts)][:limit]
+        states = [{**s.to_dict(), "kind": "derived"} for s in ui_states(doc)
+                  if near(s.start, s.end)][:limit]
+        return events, changes, states
 
     def plan(self, task: str) -> dict[str, Any]:
         """What processing would ``task`` need? Plan + coverage against this document.
@@ -508,7 +540,7 @@ class Video:
         suggestion) instead of failing silently — and nothing is ever processed
         implicitly to fill the gap.
         """
-        from .llm import NullLLM, OpenAILLM
+        from .llm import NullLLM
         from .queryplan import build_plan
 
         if not self.processed:
@@ -578,7 +610,26 @@ class Video:
 
         # Get LLM provider
         llm_provider = self.config.llm.provider or "null"
+        confidences = [s.confidence for s in selected if s.confidence is not None]
+        if llm_provider in ("null", "none"):
+            # No LLM configured is the zero-config default, not a failure: the caller (often
+            # a coding agent that is itself the reasoner) gets the evidence verbatim, labelled
+            # as extractive so nobody mistakes it for a generated interpretation.
+            warnings.append("no LLM configured: the answer is the retrieved evidence, "
+                            "quoted verbatim (extractive), not a generated interpretation")
+            lines = [f"[{i}] {span.timecode} ({span.modality}): {span.text[:200]}"
+                     for i, span in enumerate(selected, 1)]
+            return Answer(
+                question=question,
+                answer="Most relevant evidence:\n" + "\n".join(lines),
+                confidence=min(sum(confidences) / len(confidences), 1.0)
+                if confidences else 0.5,
+                evidence=list(selected),
+                spans=list(selected),
+                trace=_trace("extractive", {"provider": "none", "mode": "extractive"}),
+            )
         if llm_provider == "openai":
+            from .llm import OpenAILLM  # needs httpx; imported only when configured
             llm = OpenAILLM(self.config.llm)
         elif llm_provider == "local":
             from .llm import LocalLLM
@@ -617,7 +668,6 @@ class Video:
             )
 
         # Calculate confidence based on evidence quality
-        confidences = [s.confidence for s in selected if s.confidence is not None]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.5
 
         return Answer(

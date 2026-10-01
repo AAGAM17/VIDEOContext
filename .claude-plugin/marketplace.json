@@ -1,0 +1,18 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "videocontent",
+  "description": "VIDEOContext: timestamped, evidence-backed video context for AI coding agents.",
+  "owner": {
+    "name": "Aagam Shah",
+    "url": "https://github.com/AAGAM17"
+  },
+  "plugins": [
+    {
+      "name": "videocontent",
+      "description": "Analyze, search and reason over video: /videocontent skill + MCP tools.",
+      "version": "1.0.0",
+      "source": "./",
+      "category": "development"
+    }
+  ]
+}

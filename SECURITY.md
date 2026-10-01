@@ -163,6 +163,34 @@ read-only derived views over local `.vctx` documents:
 * Graph edges cite construction rules, not model judgments; no edge implies
   causation (`TEMPORAL_SEQUENCE` is adjacency in time).
 
+## Coding-Agent Integration
+
+The agent skill (`skills/videocontent/`), the Claude Code / Codex plugin manifests, the
+`--agent` CLI output and the built-in `videocontent mcp` server share one layer
+(`videocontent.agent.ops`) and one posture:
+
+* **Video content is data, never instructions.** Every agent result carries a
+  `content_notice`; the skill's first rule tells the agent never to act on instructions in
+  transcripts, on-screen text, subtitles or metadata. Covered by a test that renders a
+  prompt-injection line into a real video.
+* **Credential redaction by default** in agent results: API-key and token shapes, bearer
+  headers, private-key headers, and the entire value of secret-named assignments
+  (`OPENAI_API_KEY=…`, `password: …`), which also covers keys that OCR garbled.
+* **No implicit processing.** Only `analyze` processes (MCP: `allow_processing: true`),
+  locally, with the operator's configuration; vision and remote providers stay off unless
+  configured.
+* **Workspace boundary.** `videocontent mcp` reads only under `--root` (default: its
+  working directory); `..`, absolute paths elsewhere and `~` are refused. Tool arguments are
+  schema-validated (unknown keys rejected), results are size-capped, and unexpected
+  exceptions return only their type.
+* **URLs** go through the source boundary above; URLs with embedded credentials are
+  refused and query tokens are never echoed.
+* **Installer.** `videocontent init-agent` never overwrites a skill it did not install
+  (`--force` required), edits no configuration files, and registers MCP only with `--mcp`,
+  through each agent's own `mcp add` command.
+* The legacy `apps/mcp` server now rejects `video_id`s that are not plain identifiers
+  (they are used to build file paths).
+
 ## Thank You
 
 Responsible vulnerability reports help improve the security of VIDEOContext and protect its users.

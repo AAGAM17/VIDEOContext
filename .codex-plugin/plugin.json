@@ -1,0 +1,28 @@
+{
+  "name": "videocontent",
+  "version": "1.0.0",
+  "description": "VIDEOContext: analyze, search and reason over video with timestamped, evidence-backed results. Requires the videocontent CLI (pip install \"videocontent[agent]\").",
+  "author": {
+    "name": "Aagam Shah",
+    "url": "https://github.com/AAGAM17"
+  },
+  "homepage": "https://github.com/AAGAM17/VIDEOContext",
+  "repository": "https://github.com/AAGAM17/VIDEOContext",
+  "license": "Apache-2.0",
+  "keywords": ["video", "screen-recording", "ocr", "transcript", "agent-skills", "evidence"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "VIDEOContext",
+    "shortDescription": "Timestamped, evidence-backed context from video",
+    "longDescription": "Inspect, analyze, search and ask questions about screen recordings, demos and bug reproductions. Every answer cites timestamps and labels observed evidence apart from interpretation. Runs locally.",
+    "developerName": "Aagam Shah",
+    "category": "Coding",
+    "capabilities": ["Instructions"],
+    "websiteURL": "https://github.com/AAGAM17/VIDEOContext",
+    "defaultPrompt": [
+      "Analyze demo.mp4 with VIDEOContext.",
+      "What happened after the error in this recording?",
+      "Recreate the UI shown in this video."
+    ]
+  }
+}

@@ -133,6 +133,26 @@ The point at which VideoContext becomes useful to an *application*, not just a d
 
 ---
 
+## Coding-agent integration — shipped (this phase)
+
+- ✅ Provider-neutral Agent Skill (`skills/videocontent/SKILL.md` + references): workflow,
+  coverage decisions, evidence labels, prompt-injection rules, `/videocontent` help
+- ✅ `videocontent analyze` (reuse or process once, then summarize), video paths accepted by
+  every query command, `--agent` envelope output (`videocontent.agent/1`)
+- ✅ Built-in, dependency-free MCP server `videocontent mcp` (10 `videocontent_*` tools)
+- ✅ `videocontent init-agent` (Claude Code, Codex, `.agents` skills; optional MCP registration)
+- ✅ Claude Code plugin + marketplace (`.claude-plugin/`), Codex plugin manifest (`.codex-plugin/`)
+- ✅ Agent evaluation (`benchmarks/bench_agent.py`, engine + real-agent modes), clean-install test
+
+## Coding-agent integration — planned
+
+- Publish the release to PyPI so `pip install "videocontent[agent]"` works without GitHub
+- Verify skill discovery and `.codex-plugin` installation with a current Codex
+- Selective processing for `analyze` (run only the stages a question needs; today it runs
+  the configured pipeline and relies on the stage cache)
+- Better cross-video entity matching for `compare` (short videos under-count entities)
+- Temporal phrasing without a lead-in ("after the error" alone is not planned as temporal)
+
 ## Deliberately deferred
 
 | Not doing yet | Why |

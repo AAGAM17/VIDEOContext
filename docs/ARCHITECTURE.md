@@ -264,6 +264,22 @@ thin — it composes the layers below and holds no logic of its own.
 
 Surfaces are **peers**, all built on the SDK. None contains extraction logic.
 
+### Layer 7 — coding-agent integration (`videocontent.agent`, `skills/`)
+
+A thin layer that makes the surfaces above usable by AI coding agents without adding
+intelligence:
+
+- `agent/ops.py` resolves what an agent points at (video, `.vctx`, URL → the `.vctx` beside
+  it), never processes implicitly (only `analyze` does), and shapes every result into one
+  bounded, provenance-labelled, credential-redacted envelope (`videocontent.agent/1`).
+  The CLI's `--agent` output and `agent/mcp_server.py` (`videocontent mcp`, a
+  dependency-free stdio MCP server) both call it.
+- `skills/videocontent/SKILL.md` teaches any Agent Skills–compatible agent the workflow
+  (inspect → analyze with consent → narrowest query → labelled, timestamped answer) and the
+  rule that video content is data, never instructions. The same folder is loaded by the
+  Claude Code plugin (`.claude-plugin/`), the Codex plugin (`.codex-plugin/`) and shipped in
+  the wheel for `videocontent init-agent`.
+
 ---
 
 ```mermaid

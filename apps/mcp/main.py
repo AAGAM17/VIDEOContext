@@ -50,8 +50,20 @@ _docs: dict[str, VideoContextDocument] = {}
 _collections: dict[str, list[str]] = {}
 
 
+#: A video ID names a file inside the search directories below; it is never a path.
+_VIDEO_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+
+
+def _safe_id(video_id: str) -> str:
+    """Refuse IDs that could escape the search directories (``../x``, ``/etc/x``)."""
+    if not isinstance(video_id, str) or not _VIDEO_ID.fullmatch(video_id) or ".." in video_id:
+        raise ValueError("invalid video id: use letters, digits, '.', '_' or '-' only")
+    return video_id
+
+
 def _get_doc(video_id: str) -> VideoContextDocument:
     """Get a document by video ID, loading if necessary."""
+    video_id = _safe_id(video_id)
     if video_id not in _docs:
         # Try to find .vctx file
         search_paths = [
@@ -460,6 +472,10 @@ async def main():
                 return CallToolResult(content=[TextContent(
                     type="text",
                     text="Error: collection_id and 2+ video_ids are required")])
+            try:
+                video_ids = [_safe_id(vid) for vid in video_ids]
+            except ValueError as exc:
+                return CallToolResult(content=[TextContent(type="text", text=f"Error: {exc}")])
             missing = [vid for vid in video_ids if vid not in _docs
                        and not any(p.exists() for p in (
                            Path(f"/tmp/videocontent_outputs/{vid}.vctx"),

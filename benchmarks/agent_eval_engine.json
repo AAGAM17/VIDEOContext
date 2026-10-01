@@ -1,0 +1,81 @@
+{
+  "mode": "engine",
+  "analyze_seconds": {
+    "demo.mp4": 23.38,
+    "demo_cut.mp4": 15.29
+  },
+  "tasks": [
+    {
+      "task": "first-error",
+      "pass": true,
+      "detail": "first at 48.6s; truth (48.4, 57.4)",
+      "latency_ms": 40.7,
+      "output_bytes": 1845,
+      "reprocessed": false,
+      "timestamps_checked": 2,
+      "timestamps_grounded": 2
+    },
+    {
+      "task": "after-error",
+      "pass": true,
+      "detail": "evidence [57.6, 57.6, 57.6, 57.6, 59.48]; outro (57.4, 62.4)",
+      "latency_ms": 47.9,
+      "output_bytes": 4982,
+      "reprocessed": false,
+      "timestamps_checked": 5,
+      "timestamps_grounded": 5
+    },
+    {
+      "task": "compare",
+      "pass": true,
+      "detail": "removed in cut: ['Competition', 'E ConnectionError: refused on port 5432', 'Product', 'Quarterly Business Review', 'pytest -q tests/']",
+      "latency_ms": 26.7,
+      "output_bytes": 2201,
+      "reprocessed": false,
+      "timestamps_checked": 0,
+      "timestamps_grounded": 0
+    },
+    {
+      "task": "revenue",
+      "pass": true,
+      "detail": "4 occurrences [6.233, 11.98, 12.233, 12.233]; truth (6.0, 20.0)",
+      "latency_ms": 7.1,
+      "output_bytes": 1580,
+      "reprocessed": false,
+      "timestamps_checked": 4,
+      "timestamps_grounded": 4
+    },
+    {
+      "task": "ui",
+      "pass": true,
+      "detail": "2 login-page frame image(s); login in evidence=True",
+      "latency_ms": 46.5,
+      "output_bytes": 13268,
+      "reprocessed": false,
+      "timestamps_checked": 10,
+      "timestamps_grounded": 10
+    },
+    {
+      "task": "timeline",
+      "pass": true,
+      "detail": "8 narrated shots covered",
+      "latency_ms": 21.3,
+      "output_bytes": 18320,
+      "reprocessed": false,
+      "timestamps_checked": 50,
+      "timestamps_grounded": 50
+    },
+    {
+      "task": "explain",
+      "pass": true,
+      "detail": "evt_0077 \u2192 start 48.6",
+      "latency_ms": 28.4,
+      "output_bytes": 2818,
+      "reprocessed": false,
+      "timestamps_checked": 2,
+      "timestamps_grounded": 2
+    }
+  ],
+  "passed": 7,
+  "total": 7
+}

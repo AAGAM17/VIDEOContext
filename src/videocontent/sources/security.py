@@ -109,7 +109,8 @@ def check_hostname(hostname: str, *, allow_private: bool = False) -> list[str]:
         if reason is not None:
             raise _fail(
                 f"URL resolves to a blocked {reason}: {hostname}",
-                hint="Pass --allow-private-ips only for trusted test targets.",
+                hint="Only for trusted test targets: --set sources.allow_private_ips=true "
+                     "(or VIDEO_CONTEXT_SOURCE_ALLOW_PRIVATE_IPS=true).",
             )
         return [str(literal)]
 

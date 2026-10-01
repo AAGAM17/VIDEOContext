@@ -1,55 +1,92 @@
 <div align="center">
 
-# VideoContext
+# VIDEOContext
 
-### The open-source semantic layer for video
+### Give AI agents context they can reason over from video.
 
-Turn video into timestamped, searchable context for AI agents and applications.
+Timestamped, multimodal, evidence-grounded — not just a transcript. Runs locally.
 
-<br />
-
-```mermaid
-flowchart LR
-    V["🎬 Video"]
-
-    V --> P["Multimodal Processing"]
-
-    P --> ASR["Speech"]
-    P --> OCR["OCR"]
-    P --> VIS["Vision"]
-    P --> OBJ["Objects"]
-    P --> EVT["Events"]
-    P --> SCN["Scenes"]
-
-    ASR --> CTX
-    OCR --> CTX
-    VIS --> CTX
-    OBJ --> CTX
-    EVT --> CTX
-    SCN --> CTX
-
-    CTX["📦 .vctx<br/>Temporal Context"]
-
-    CTX --> RET["Retrieval"]
-
-    RET --> SDK["Python SDK"]
-    RET --> CLI["CLI"]
-    RET --> API["REST API"]
-    RET --> MCP["MCP Server"]
-
-    SDK --> APP["Applications"]
-    MCP --> AGENT["🤖 AI Agents"]
-```
-
-<br />
-
-**Process once. Query repeatedly. Keep every result connected to the moment it came from.**
-
-<br />
-
-[Quick Start](#quick-start) · [Python SDK](#python-sdk) · [CLI](#cli) · [REST API](#rest-api) · [MCP Server](#mcp-server) · [Architecture](docs/ARCHITECTURE.md) · [`.vctx` Format](docs/VIDEO_CONTEXT_SPEC.md) · [Roadmap](docs/ROADMAP.md)
+[Install](#install) · [Use with AI agents](#use-videocontext-with-ai-coding-agents) · [CLI](#cli) · [MCP](#mcp-server) · [Architecture](docs/ARCHITECTURE.md) · [`.vctx` Format](docs/VIDEO_CONTEXT_SPEC.md)
 
 </div>
+
+---
+
+## Install
+
+```bash
+pipx install "videocontent[agent] @ git+https://github.com/AAGAM17/VIDEOContext"   # the CLI
+videocontent init-agent                                                            # teach your agents
+```
+
+You also need **FFmpeg** (`brew install ffmpeg` / `apt install ffmpeg`); **Tesseract** adds
+on-screen text (`brew install tesseract` / `apt install tesseract-ocr`). No API key, no cloud
+account, no Docker. `uv tool install …` or `pip install …` work the same way as `pipx`.
+
+> The `videocontent` release on PyPI (0.1.0) predates the agent integration; until the next
+> release, install from GitHub as shown.
+
+## Use VIDEOContext with AI coding agents
+
+Open Claude Code, Codex or any Agent Skills–compatible agent in a folder with a video and ask:
+
+```text
+Analyze demo.mp4 and tell me what happened after the error.
+```
+
+or invoke it explicitly: `/videocontent analyze demo.mp4` (Claude Code) · `$videocontent analyze demo.mp4` (Codex).
+
+The agent inspects the video, analyzes it once (locally), asks a temporal question and
+answers with evidence. Abridged from a real Claude Code run on this repository's demo video:
+
+```markdown
+### Answer
+At 00:00:48.600 a terminal runs `pytest -q tests/` and one test fails with
+`ConnectionError: refused on port 5432`. After that, the terminal closes at ~00:00:57, the
+presenter says "That concludes the review", and the video returns to the title slide.
+Nothing in the recording shows the error being fixed.
+
+### Evidence
+00:00:48.600 — [observed · on-screen text] "E ConnectionError: refused on port 5432"
+00:00:57.080 — [observed · speech] "That concludes the review, thank you."
+00:00:57.375 — [detected · event] scene boundary
+
+### Source
+demo.mp4 (demo.vctx)
+
+### Trace
+inspect → not_analyzed → analyze → ask "what happened after the ConnectionError" → 5 spans
+```
+
+What the agent can do with it: find when something happened, ask what happened before or
+after a moment, list every occurrence of an error or concept, compare two recordings, and
+build **context packages** (evidence, UI states, events, frame images with timestamps) for
+rebuilding a UI, writing Playwright tests, debugging, or writing docs. See
+[examples/agents](examples/agents).
+
+| Agent | Shortest path | Details |
+|---|---|---|
+| Claude Code | `videocontent init-agent` — or `/plugin marketplace add AAGAM17/VIDEOContext` then `/plugin install videocontent@videocontent` | [docs/agents/claude-code.md](docs/agents/claude-code.md) |
+| Codex | `videocontent init-agent --agent codex` | [docs/agents/codex.md](docs/agents/codex.md) |
+| Other agents / any MCP client | `videocontent init-agent --agent agents` · MCP server: `videocontent mcp` | [docs/agents/generic-agents.md](docs/agents/generic-agents.md) |
+
+Safety by default: extracted video text is treated as **untrusted data, never instructions**;
+credential-shaped strings are redacted; nothing is processed without being asked and nothing
+leaves the machine unless you configure a remote provider.
+
+## CLI in 30 seconds
+
+```bash
+videocontent analyze demo.mp4                                   # process once, summarize
+videocontent ask demo.mp4 "What happened after the error?"      # evidence-backed answer
+videocontent search demo.mp4 "ConnectionError"                  # timestamped matches
+videocontent timeline demo.mp4 --from 0:40 --to 1:00            # what happened in a range
+videocontent context demo.mp4 "Recreate this UI in React"      # budgeted package for a task
+videocontent compare before.mp4 after.mp4                       # what changed
+```
+
+Every command accepts the video or its `.vctx`, and has `--json` (stable script output) and
+`--agent` (bounded, provenance-labelled, redacted JSON for AI agents).
 
 ---
 
@@ -913,6 +950,20 @@ videocontent context demo.vctx "What caused the checkout error?" \
   --explain
 ```
 
+## One-shot Analysis and Agent Setup
+
+```bash
+videocontent analyze demo.mp4                 # reuse demo.vctx or process once; summarize
+videocontent analyze demo.mp4 --no-process    # report only; never process
+videocontent analyze demo.mp4 --profile ui_design --json
+videocontent init-agent                       # install the skill for detected agents
+videocontent init-agent --check               # where is it installed, is it current
+videocontent mcp                              # MCP server on stdio
+```
+
+Every query command below accepts the video file as well as its `.vctx`, and `--agent`
+switches output to the bounded agent envelope (`schema: videocontent.agent/1`).
+
 ## Agent Commands
 
 ```bash
@@ -1254,13 +1305,27 @@ curl -X POST http://localhost:8000/v1/collections/compare \
 
 # MCP Server
 
-VideoContext includes a Model Context Protocol server under:
+**Recommended:** `videocontent mcp` — built into the package, no extra dependencies, ten
+bounded tools (`videocontent_inspect`, `_analyze`, `_search`, `_ask`, `_timeline`,
+`_entities`, `_changes`, `_context`, `_compare`, `_explain`) that take a video path directly.
+
+```bash
+claude mcp add videocontent -- videocontent mcp     # Claude Code
+codex mcp add videocontent -- videocontent mcp      # Codex
+videocontent init-agent --mcp                        # both, via their own CLIs
+```
+
+Any other MCP client: command `videocontent`, args `["mcp"]`, stdio transport. See
+[docs/agents/generic-agents.md](docs/agents/generic-agents.md).
+
+## Legacy MCP server (`apps/mcp`)
+
+The original server below takes `video_id`s and requires the `mcp` 1.x SDK (its API was
+removed in `mcp` 2.x, hence the `<2` pin in the extra):
 
 ```text
 apps/mcp
 ```
-
-Install MCP dependencies:
 
 ```bash
 pip install "videocontent[mcp]"
@@ -1802,7 +1867,8 @@ The current repository includes:
 * CLI
 * LLM-backed question answering
 * REST API
-* MCP server
+* MCP server (built-in `videocontent mcp`, plus the legacy `apps/mcp`)
+* Agent integration: provider-neutral skill, Claude Code and Codex plugins, `init-agent`
 * React web application
 * Tests
 * Documentation
