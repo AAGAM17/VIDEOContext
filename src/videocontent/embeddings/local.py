@@ -13,12 +13,10 @@ from __future__ import annotations
 
 import importlib.util
 from functools import lru_cache
-from pathlib import Path
 from typing import Any
 
 from ...config import EmbeddingConfig
 from ...errors import DependencyMissingError, ProviderError
-from ...interfaces import EmbeddingProvider
 from ...logging import get_logger
 
 log = get_logger("embeddings.local")

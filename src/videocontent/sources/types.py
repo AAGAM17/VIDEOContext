@@ -101,6 +101,7 @@ class SourceInspection(BaseModel):
     requires_authentication: bool = False
     estimated_size_bytes: int | None = None
     warnings: list[str] = Field(default_factory=list)
+    hint: str | None = None
 
 
 def stable_id(prefix: str, canonical: str) -> str:

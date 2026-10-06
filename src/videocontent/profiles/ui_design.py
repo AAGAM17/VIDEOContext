@@ -10,17 +10,17 @@ from __future__ import annotations
 from typing import Any
 
 from ..schema.v1 import (
-    VideoContextDocument,
-    TimeSpan,
-    UIDesignProfile,
-    VisualStyleProfile,
-    TypographyProfile,
-    LayoutProfile,
     ComponentProfile,
     InteractionProfile,
+    LayoutProfile,
     MotionProfile,
+    TimeSpan,
+    TypographyProfile,
+    UIDesignProfile,
+    VideoContextDocument,
+    VisualStyleProfile,
 )
-from .base import SemanticProfile, ProfileContext
+from .base import ProfileContext, SemanticProfile
 
 
 class UIDesignProfileBuilder(SemanticProfile):
@@ -65,7 +65,6 @@ class UIDesignProfileBuilder(SemanticProfile):
         # Analyze motion
         motion = self._analyze_motion(doc)
 
-        from ..schema.v1 import UIDesignProfile
         return UIDesignProfile(
             visual_style=visual_style,
             typography=typography,
@@ -77,7 +76,6 @@ class UIDesignProfileBuilder(SemanticProfile):
 
     def _analyze_visual_style(self, doc: VideoContextDocument) -> Any:
         """Analyze overall visual style from vision and OCR."""
-        from ..schema.v1 import VisualStyleProfile, TimeSpan
 
         style_keywords = {
             "minimal": ["minimal", "clean", "simple", "uncluttered"],
@@ -136,7 +134,6 @@ class UIDesignProfileBuilder(SemanticProfile):
 
     def _analyze_typography(self, doc: VideoContextDocument) -> Any:
         """Analyze typography characteristics."""
-        from ..schema.v1 import TypographyProfile, TimeSpan
 
         typography_keywords = {
             "strong_hierarchy": ["large heading", "big title", "prominent heading", "heading hierarchy"],
@@ -181,7 +178,6 @@ class UIDesignProfileBuilder(SemanticProfile):
 
     def _analyze_layout(self, doc: VideoContextDocument) -> Any:
         """Analyze layout patterns."""
-        from ..schema.v1 import LayoutProfile, TimeSpan
 
         layout_patterns = {
             "full_width_sections": ["full width", "full-width", "edge to edge", "full bleed"],
@@ -216,7 +212,6 @@ class UIDesignProfileBuilder(SemanticProfile):
 
     def _analyze_components(self, doc: VideoContextDocument) -> list[Any]:
         """Detect and analyze UI components."""
-        from ..schema.v1 import ComponentProfile, TimeSpan
 
         component_types = {
             "navigation": ["navigation", "nav bar", "navbar", "menu", "sidebar navigation"],
@@ -282,7 +277,6 @@ class UIDesignProfileBuilder(SemanticProfile):
 
     def _analyze_interactions(self, doc: VideoContextDocument) -> Any:
         """Analyze interaction patterns."""
-        from ..schema.v1 import InteractionProfile, TimeSpan
 
         interaction_patterns = {
             "smooth_transitions": ["smooth", "transition", "animate", "animation"],
@@ -326,7 +320,6 @@ class UIDesignProfileBuilder(SemanticProfile):
 
     def _analyze_motion(self, doc: VideoContextDocument) -> list[Any]:
         """Analyze motion/animation patterns."""
-        from ..schema.v1 import MotionProfile, TimeSpan
 
         motion_keywords = {
             "fade": ["fade in", "fade out", "fade", "opacity"],

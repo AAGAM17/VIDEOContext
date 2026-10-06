@@ -12,6 +12,7 @@ import hashlib
 import os
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -318,7 +319,7 @@ class DirectURLAdapter:
 
         # Re-check DNS for the final host right before streaming bytes (TOCTOU guard:
         # headers were validated, but the body connection resolves again inside urlopen).
-        host = urllib.request.urlparse(final_url).hostname or ""
+        host = urllib.parse.urlparse(final_url).hostname or ""
         security.check_hostname(host.strip("[]"), allow_private=cfg.allow_private_ips)
 
         ctype = ""
@@ -387,9 +388,7 @@ class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
 
 
 def _suffix_for(url: str, headers: Any) -> str:
-    from urllib.request import urlparse as _up
-
-    path_suffix = Path(_up(url).path).suffix.lower()
+    path_suffix = Path(urllib.parse.urlparse(url).path).suffix.lower()
     if path_suffix in (".mp4", ".mkv", ".webm", ".avi", ".mov", ".m4v", ".mpg",
                        ".mpeg", ".ts", ".flv", ".ogv", ".m4a", ".mp3", ".wav"):
         return path_suffix

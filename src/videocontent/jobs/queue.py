@@ -10,9 +10,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
-from ..config import ProcessingConfig, load_config
+from ..config import ProcessingConfig
 from ..logging import get_logger
 from ..sdk import Video
 
@@ -172,7 +172,6 @@ class JobQueue:
 
 async def process_job(job: Job, redis_url: str) -> None:
     """Process a video job (worker function)."""
-    import arq
 
     queue = JobQueue(redis_url)
     queue.update_job(job.id, status=JobStatus.PROCESSING, progress=0.1)
@@ -229,4 +228,4 @@ class ArqWorkerSettings:
         return Settings
 
 
-__all__ = ["Job", "JobQueue", "JobStatus", "ArqWorkerSettings", "process_job"]
+__all__ = ["ArqWorkerSettings", "Job", "JobQueue", "JobStatus", "process_job"]

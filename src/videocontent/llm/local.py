@@ -12,7 +12,6 @@ import httpx
 
 from ..config import LLMConfig
 from ..errors import ProviderError
-from ..interfaces import LLMProvider
 from ..logging import get_logger
 
 log = get_logger("llm.local")

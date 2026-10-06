@@ -8,7 +8,6 @@ shape the upstream API expects. The core never imports a vendor SDK.
 from __future__ import annotations
 
 import base64
-import json
 import os
 import time
 from dataclasses import dataclass
@@ -461,4 +460,4 @@ class LocalVLMVision:
             self._client = None
 
 
-__all__ = ["OpenAIVision", "GeminiVision", "LocalVLMVision"]
+__all__ = ["GeminiVision", "LocalVLMVision", "OpenAIVision"]

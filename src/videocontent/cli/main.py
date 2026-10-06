@@ -1344,8 +1344,8 @@ def benchmark(
     Measures per-stage timings, frame counts, and estimated costs.
     Useful for comparing configurations and tracking regressions.
     """
-    from ..sdk import Video
     from ..config import ProcessingConfig
+    from ..sdk import Video
 
     # Use minimal config for consistent benchmark
     cfg = ProcessingConfig()

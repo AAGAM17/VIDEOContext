@@ -7,9 +7,10 @@ error rather than a confusing missing-dependency error.
 
 from __future__ import annotations
 
+from typing import Any
+
 from ..config import LLMConfig
 from ..errors import ProviderError
-from ..interfaces import LLMProvider
 
 
 class NullLLM:

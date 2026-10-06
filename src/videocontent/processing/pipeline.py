@@ -34,7 +34,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .. import registry
 from ..config import ProcessingConfig
@@ -234,6 +234,7 @@ def _require_doc(run: Run, stage: str) -> VideoContextDocument:
     """
     if run.doc is None:
         raise StageError(
+            stage,
             f"stage {stage!r} needs an assembled document",
             hint="Derived stages must come after the extraction stages in Pipeline.stages().",
         )
@@ -365,7 +366,7 @@ class Pipeline:
 
     # -- runner -------------------------------------------------------------
 
-    def _execute(self, stage: Stage, run: Run, cache: Optional[StageCache]) -> None:
+    def _execute(self, stage: Stage, run: Run, cache: StageCache | None) -> None:
         missing = [name for name in stage.requires if not run.ran(name)]
         if missing:
             run.records.append(

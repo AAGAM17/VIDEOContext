@@ -531,7 +531,7 @@ class Video:
         modalities: list[str] | None = None,
         top_k: int = 5,
         min_score: float | None = None,
-    ) -> "Answer":
+    ) -> Answer:
         """Answer a question using planned, graph-aware retrieval + an LLM.
 
         Pipeline: QueryPlan → coverage check → graph-aware retrieval → evidence
@@ -692,7 +692,7 @@ class Video:
         max_frames: int | None = None,
         max_seconds: float | None = None,
         expand_s: float = 0.0,
-    ) -> "OptimizedContext":
+    ) -> OptimizedContext:
         """Get optimized AI context for a specific task.
 
         This is the main entry point for multi-resolution context.
@@ -718,11 +718,10 @@ class Video:
             evidence, frames, and packed context string.
         """
         from .routing import (
-            classify_task,
-            select_context,
             ContextBudget,
+            classify_task,
             pack_context,
-            TaskClassification,
+            select_context,
         )
 
         if not self.processed:
@@ -768,7 +767,7 @@ class Video:
         max_tokens: int = 4000,
         modalities: list[str] | None = None,
         **kw: Any,
-    ) -> "OptimizedContext":
+    ) -> OptimizedContext:
         """Alias for context() - more natural for task-oriented usage."""
         return self.context(task, max_tokens=max_tokens, modalities=modalities, **kw)
 
@@ -789,7 +788,7 @@ class Video:
         Returns:
             The profile object (Pydantic model) or None if not applicable.
         """
-        from .profiles import get_profile_builder, ProfileContext
+        from .profiles import ProfileContext, get_profile_builder
 
         if not self.processed:
             raise NotProcessedError(
@@ -804,7 +803,8 @@ class Video:
             return builder.build(profile_ctx)
         except ValueError:
             available = ", ".join(["ui_design", "application", "product_demo", "tutorial"])
-            raise ValueError(f"Unknown profile: {profile_name}. Available: {available}")
+            raise ValueError(
+                f"Unknown profile: {profile_name}. Available: {available}") from None
 
     def profiles(self) -> dict[str, Any]:
         """Get all available semantic profiles for this video.
@@ -812,7 +812,7 @@ class Video:
         Returns:
             Dict mapping profile names to their generated objects.
         """
-        from .profiles import list_profiles, get_profile_builder, ProfileContext
+        from .profiles import ProfileContext, get_profile_builder, list_profiles
 
         if not self.processed:
             raise NotProcessedError(
@@ -829,8 +829,9 @@ class Video:
                 builder = builder_cls()
                 if builder.supports(profile_ctx):
                     results[name] = builder.build(profile_ctx)
-            except Exception:
-                pass
+            except Exception as exc:
+                log.warning("sdk.profile_failed",
+                            extra={"profile": name, "error": type(exc).__name__})
 
         return results
 

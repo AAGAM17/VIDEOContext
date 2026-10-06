@@ -101,9 +101,9 @@ def plan_for_task(task: str) -> ProcessingPlan:
     """
     lowered = task.lower()
     wanted: dict[str, str] = {}
-    for pattern, stages, why in _SIGNAL_RULES:
+    for pattern, rule_stages, why in _SIGNAL_RULES:
         if re.search(pattern, lowered):
-            for stage in stages:
+            for stage in rule_stages:
                 wanted.setdefault(stage, why)
     if not wanted:
         wanted = {

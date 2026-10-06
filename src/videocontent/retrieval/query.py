@@ -333,6 +333,7 @@ class Retriever:
             hits.append(
                 LexicalHit(
                     record=record,
+                    bm25=float(score),  # vector similarity, reused as the rank tiebreak
                     matched=(),
                     coverage=0.0,
                     phrase=False,

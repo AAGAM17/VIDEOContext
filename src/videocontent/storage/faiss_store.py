@@ -14,15 +14,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
-import pickle
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
 from ...errors import DependencyMissingError
-from ...interfaces import VectorStore
 from ...logging import get_logger
 
 log = get_logger("storage.faiss")

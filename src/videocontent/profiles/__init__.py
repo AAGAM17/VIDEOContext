@@ -7,11 +7,11 @@ lazily when requested and cached in the document.
 
 from __future__ import annotations
 
-from .base import SemanticProfile, ProfileContext
-from .ui_design import UIDesignProfileBuilder
 from .application import ApplicationProfileBuilder
+from .base import ProfileContext, SemanticProfile
 from .product_demo import ProductDemoProfileBuilder
 from .tutorial import TutorialProfileBuilder
+from .ui_design import UIDesignProfileBuilder
 
 # Profile registry
 PROFILE_BUILDERS = {
@@ -36,13 +36,13 @@ def list_profiles() -> list[str]:
 
 
 __all__ = [
-    "SemanticProfile",
-    "ProfileContext",
     "PROFILE_BUILDERS",
-    "get_profile_builder",
-    "list_profiles",
-    "UIDesignProfileBuilder",
     "ApplicationProfileBuilder",
     "ProductDemoProfileBuilder",
+    "ProfileContext",
+    "SemanticProfile",
     "TutorialProfileBuilder",
+    "UIDesignProfileBuilder",
+    "get_profile_builder",
+    "list_profiles",
 ]

@@ -11,10 +11,10 @@ We produce: 00:00-00:45 — Dashboard visible (persistent elements: sidebar, hea
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from ..schema.v1 import VideoContextDocument, TimeSpan, VisualState, Event
+from ..schema.v1 import Event, VideoContextDocument, VisualState
 
 
 @dataclass
@@ -322,8 +322,8 @@ def compress_interaction_states(doc: VideoContextDocument) -> tuple[list[VisualS
 
 
 __all__ = [
-    "compress_temporal_states",
-    "compress_interaction_states",
     "FrameDescription",
     "VisualStateTrack",
+    "compress_interaction_states",
+    "compress_temporal_states",
 ]

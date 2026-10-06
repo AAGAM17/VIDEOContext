@@ -69,7 +69,7 @@ class ProfileBuilder:
 
 
 __all__ = [
-    "SemanticProfile",
-    "ProfileContext",
     "ProfileBuilder",
+    "ProfileContext",
+    "SemanticProfile",
 ]

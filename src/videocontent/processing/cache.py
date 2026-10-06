@@ -17,7 +17,7 @@ import pickle
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from ..logging import get_logger
 
@@ -60,7 +60,7 @@ class StageCache:
         stage_name: str,
         stage_version: str,
         config_hash: str,
-    ) -> Optional[CacheEntry]:
+    ) -> CacheEntry | None:
         """Retrieve a cached stage result if valid."""
         if not video_hash:
             return None
@@ -110,7 +110,7 @@ class StageCache:
         stage_version: str,
         config_hash: str,
         data: Any,
-        metadata: Optional[dict[str, Any]] = None,
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         """Store a stage result in the cache."""
         if not video_hash:
@@ -139,7 +139,7 @@ class StageCache:
         except Exception as exc:
             log.warning("cache.write_failed", extra={"stage": stage_name, "error": str(exc)})
 
-    def invalidate(self, video_hash: str, stage_name: Optional[str] = None) -> int:
+    def invalidate(self, video_hash: str, stage_name: str | None = None) -> int:
         """Invalidate cache entries for a video (and optionally a specific stage)."""
         if not video_hash:
             return 0

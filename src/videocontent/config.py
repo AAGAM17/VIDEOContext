@@ -163,6 +163,10 @@ class VisionConfig(_Cfg):
     batch_size: int = Field(default=4, gt=0)
     max_concurrency: int = Field(default=2, gt=0)
     prompt: str | None = None
+    api_key: str | None = None
+    base_url: str | None = None
+    organization: str | None = None
+    max_tokens: int = Field(default=500, gt=0)
 
 
 class EmbeddingConfig(_Cfg):

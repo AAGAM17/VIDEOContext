@@ -13,8 +13,11 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any
 
+from ..logging import get_logger
 from ..retrieval import EvidenceSpan, SearchResult, search
 from ..schema.v1 import VideoContextDocument
+
+log = get_logger("routing")
 
 
 class TaskType(str, Enum):
@@ -89,8 +92,6 @@ class ContextSelection:
 
 def classify_task(query: str, doc: VideoContextDocument | None = None) -> TaskClassification:
     """Classify a user query/task into a task type."""
-    query_lower = query.lower()
-
     # Keyword-based classification (can be enhanced with ML later)
     # Rules are checked in order; more specific patterns should come first
     classification_rules = [
@@ -265,12 +266,13 @@ def select_context(
     # 1. Build requested profiles
     for profile_name in task.suggested_profiles:
         try:
-            builder = get_profile_builder(profile_name)
-            profile_ctx = ProfileContext(doc=doc)
+            builder = get_profile_builder(profile_name)()
             profile_result = builder.build(profile_ctx)
             selection["profiles"][profile_name] = profile_result
-        except Exception:
-            pass
+        except Exception as exc:
+            # A profile that fails is omitted, not fatal, but the omission must be visible.
+            log.warning("routing.profile_failed",
+                        extra={"profile": profile_name, "error": type(exc).__name__})
 
     # 2. Get evidence if needed
     if task.requires_evidence and query:

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from typing import Any
 
-from ..schema.v1 import VideoContextDocument, TutorialProfile, TimeSpan
-from .base import SemanticProfile, ProfileContext
+from ..schema.v1 import TimeSpan, TutorialProfile, VideoContextDocument
+from .base import ProfileContext, SemanticProfile
 
 
 class TutorialProfileBuilder(SemanticProfile):
