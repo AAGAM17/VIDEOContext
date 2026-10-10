@@ -62,8 +62,8 @@ def _resolve_device(requested: str | None) -> str | None:
                 return "cuda"
             if torch.backends.mps.is_available():
                 return "mps"
-        except Exception:
-            pass
+        except Exception:  # torch absent or probe failed: fall back to CPU
+            log.debug("embeddings.device_probe_failed")
         return "cpu"
     return requested
 
