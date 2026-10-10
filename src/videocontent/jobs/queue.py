@@ -221,6 +221,8 @@ class ArqWorkerSettings:
         if not _arq_installed():
             raise RuntimeError("arq not installed. pip install arq")
 
+        import arq  # optional dependency, imported lazily
+
         class Settings(cls):
             redis_settings = arq.RedisSettings.from_url(redis_url)
             queue_name = "videocontent"

@@ -145,7 +145,6 @@ class StageCache:
             return 0
 
         count = 0
-        prefix = f"{video_hash}|{stage_name}|" if stage_name else f"{video_hash}|"
         for meta_file in self.cache_dir.glob("*.meta"):
             try:
                 with meta_file.open("r") as f:
@@ -156,7 +155,8 @@ class StageCache:
                     cache_file.unlink(missing_ok=True)
                     meta_file.unlink(missing_ok=True)
                     count += 1
-            except Exception:
+            except Exception as exc:
+                log.debug("cache.invalidate_skipped", extra={"file": meta_file.name, "error": str(exc)})
                 continue
 
         if count > 0:

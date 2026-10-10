@@ -629,12 +629,7 @@ def pack_context(selection: dict[str, Any], task_type: str, query: str | None = 
 
 def format_profile(profile: Any) -> str:
     """Format a profile object for display."""
-    if hasattr(profile, "model_dump"):
-        data = profile.model_dump()
-    else:
-        data = profile
-
-    lines = []
+    lines: list[str] = []
 
     def format_dict(d: dict, indent: int = 0):
         prefix = "  " * indent
