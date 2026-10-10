@@ -562,7 +562,8 @@ class Video:
             warnings.append("missing modalities: "
                             + ", ".join(f"{mod} ({hint})" for mod, hint in zip(
                                 plan.coverage["missing"],
-                                plan.coverage.get("suggestions", []))))
+                                plan.coverage.get("suggestions", []),
+                                strict=False)))
 
         search_result, explanation = self.retriever.search_graph(
             question, modalities=modalities, top_k=top_k, graph=self.graph())

@@ -163,7 +163,7 @@ def classify_task(query: str, doc: VideoContextDocument | None = None) -> TaskCl
     scores: dict[TaskType, float] = {}
     matched_keywords: dict[TaskType, list[str]] = {}
 
-    for keywords, task_type, flags in classification_rules:
+    for keywords, task_type, _flags in classification_rules:
         score = 0
         matched = []
         for kw in keywords:
@@ -547,7 +547,7 @@ def trim_to_budget(selection: dict[str, Any], budget: ContextBudget) -> dict[str
             continue
 
         # Trim profiles
-        for profile_name, profile_data in selection["profiles"].items():
+        for profile_data in selection["profiles"].values():
             if hasattr(profile_data, "model_dump"):
                 # For Pydantic models, we can't easily trim, so remove
                 pass

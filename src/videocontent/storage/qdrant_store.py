@@ -63,7 +63,7 @@ class QdrantStore:
 
         points = [
             PointStruct(id=id_, vector=vector, payload={})
-            for id_, vector in zip(ids, vectors)
+            for id_, vector in zip(ids, vectors, strict=True)
         ]
         self.client.upsert(collection_name=self.collection_name, points=points)
         log.debug("qdrant.added", extra={"count": len(points)})
