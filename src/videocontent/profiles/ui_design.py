@@ -242,36 +242,34 @@ class UIDesignProfileBuilder(SemanticProfile):
         for vision in doc.vision:
             desc = vision.description.lower()
             for comp_type, keywords in component_types.items():
-                if any(kw in desc for kw in keywords):
-                    if comp_type not in seen_types:
-                        seen_types.add(comp_type)
-                        components.append(ComponentProfile(
-                            component_id=f"{comp_type}_{len(components)}",
-                            type=comp_type,
-                            first_seen=vision.start,
-                            last_seen=vision.end,
-                            visual_characteristics=[],
-                            content_structure=[],
-                            confidence=0.7,
-                            evidence=[TimeSpan(start=vision.start, end=vision.end)],
-                        ))
+                if comp_type not in seen_types and any(kw in desc for kw in keywords):
+                    seen_types.add(comp_type)
+                    components.append(ComponentProfile(
+                        component_id=f"{comp_type}_{len(components)}",
+                        type=comp_type,
+                        first_seen=vision.start,
+                        last_seen=vision.end,
+                        visual_characteristics=[],
+                        content_structure=[],
+                        confidence=0.7,
+                        evidence=[TimeSpan(start=vision.start, end=vision.end)],
+                    ))
 
         for ocr in doc.ocr:
             text = ocr.text.lower()
             for comp_type, keywords in component_types.items():
-                if any(kw in text for kw in keywords):
-                    if comp_type not in seen_types:
-                        seen_types.add(comp_type)
-                        components.append(ComponentProfile(
-                            component_id=f"{comp_type}_{len(components)}",
-                            type=comp_type,
-                            first_seen=ocr.start,
-                            last_seen=ocr.end,
-                            visual_characteristics=[],
-                            content_structure=[],
-                            confidence=0.6,
-                            evidence=[TimeSpan(start=ocr.start, end=ocr.end)],
-                        ))
+                if comp_type not in seen_types and any(kw in text for kw in keywords):
+                    seen_types.add(comp_type)
+                    components.append(ComponentProfile(
+                        component_id=f"{comp_type}_{len(components)}",
+                        type=comp_type,
+                        first_seen=ocr.start,
+                        last_seen=ocr.end,
+                        visual_characteristics=[],
+                        content_structure=[],
+                        confidence=0.6,
+                        evidence=[TimeSpan(start=ocr.start, end=ocr.end)],
+                    ))
 
         return components
 

@@ -782,12 +782,10 @@ class Pipeline:
             run.transcript = cached_data
         elif stage_name == "vision":
             run.vision = cached_data
-        elif stage_name == "events":
-            if run.doc:
-                run.doc.events = cached_data
-        elif stage_name == "segments":
-            if run.doc:
-                run.doc.segments = cached_data
+        elif stage_name == "events" and run.doc:
+            run.doc.events = cached_data
+        elif stage_name == "segments" and run.doc:
+            run.doc.segments = cached_data
 
     def _get_cached_data(self, stage_name: str, run: Run) -> Any:
         """Extract cacheable data from the run object for a stage."""
