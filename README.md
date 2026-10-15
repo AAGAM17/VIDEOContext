@@ -6,7 +6,7 @@
 
 Timestamped, multimodal, evidence-grounded — not just a transcript. Runs locally.
 
-[Install](#install) · [Use with AI agents](#use-videocontext-with-ai-coding-agents) · [CLI](#cli) · [MCP](#mcp-server) · [Architecture](docs/ARCHITECTURE.md) · [`.vctx` Format](docs/VIDEO_CONTEXT_SPEC.md)
+[Website](https://videocontext.vercel.app) · [Install](#install) · [Use with AI agents](#use-videocontext-with-ai-coding-agents) · [CLI](#cli) · [MCP](#mcp-server) · [Architecture](docs/ARCHITECTURE.md) · [`.vctx` Format](docs/VIDEO_CONTEXT_SPEC.md)
 
 </div>
 
